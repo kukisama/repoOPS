@@ -1,0 +1,70 @@
+# 当推送 tag（如 v1.0.0 或 1.0.0）时，自动构建并发布 GitHub Release
+#
+# 流程：build-windows（构建 Desktop 版本）→ release job（创建 Release 并上传产物）
+# 关联文件：
+#   - RELEASE_NOTES.md          ← Release 说明正文（每次发布前编辑）
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 构建 Windows Desktop 版本 ──
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (win-x64)
+        run: >
+          dotnet publish src/RepoOPS.Desktop/RepoOPS.Desktop.csproj
+          -c Release
+          -r win-x64
+          --self-contained false
+          -o artifacts/publish/RepoOPS-win-x64
+
+      - name: Create zip
+        run: |
+          Compress-Archive `
+            -Path "artifacts/publish/RepoOPS-win-x64/*" `
+            -DestinationPath "artifacts/RepoOPS-win-x64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-win-x64
+          path: artifacts/RepoOPS-win-x64.zip
+
+  # ── 创建 GitHub Release ──
+  release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          append_body: true
+          files: |
+            dist/*.zip

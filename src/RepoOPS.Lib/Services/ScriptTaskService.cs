@@ -164,7 +164,7 @@ public sealed class ScriptTaskService(
             };
 
             startInfo.Environment["TERM"] = "xterm-256color";
-            startInfo.Environment["NO_COLOR"] = "";
+            startInfo.Environment["PYTHONUTF8"] = "1";
 
             await hubContext.Clients.All.SendAsync("TaskOutput", executionId,
                 $"\x1b[36m> {command} {arguments}\x1b[0m\r\n\x1b[36m> Working directory: {workingDir}\x1b[0m\r\n\r\n",
@@ -220,10 +220,27 @@ public sealed class ScriptTaskService(
 
         try
         {
-            var arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
+            // Force UTF-8 output encoding to correctly handle CJK characters
+            // On Chinese Windows, pwsh defaults to system OEM codepage (GBK/936) for console output,
+            // which mismatches with the UTF-8 StreamReader and causes garbled text.
+            var escapedPath = scriptPath.Replace("'", "''");
+            var psCommand = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+                            "$OutputEncoding = [System.Text.Encoding]::UTF8; " +
+                            $"& '{escapedPath}'";
             if (!string.IsNullOrWhiteSpace(runningTask.Task.Arguments))
             {
-                arguments += $" {runningTask.Task.Arguments}";
+                psCommand += $" {runningTask.Task.Arguments}";
+            }
+            psCommand += "; exit $LASTEXITCODE";
+
+            var encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(psCommand));
+            var arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}";
+
+            // Display-friendly version for the terminal UI
+            var displayArgs = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
+            if (!string.IsNullOrWhiteSpace(runningTask.Task.Arguments))
+            {
+                displayArgs += $" {runningTask.Task.Arguments}";
             }
 
             var startInfo = new ProcessStartInfo
@@ -240,10 +257,9 @@ public sealed class ScriptTaskService(
             };
 
             startInfo.Environment["TERM"] = "xterm-256color";
-            startInfo.Environment["NO_COLOR"] = "";
 
             await hubContext.Clients.All.SendAsync("TaskOutput", executionId,
-                $"\x1b[36m> pwsh {arguments}\x1b[0m\r\n\x1b[36m> Working directory: {workingDir}\x1b[0m\r\n\r\n",
+                $"\x1b[36m> pwsh {displayArgs}\x1b[0m\r\n\x1b[36m> Working directory: {workingDir}\x1b[0m\r\n\r\n",
                 cancellationToken);
 
             using var process = new Process { StartInfo = startInfo };
