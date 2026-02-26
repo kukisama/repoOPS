@@ -220,9 +220,11 @@ public sealed class ScriptTaskService(
 
         try
         {
-            // Force UTF-8 output encoding to correctly handle CJK characters
-            // On Chinese Windows, pwsh defaults to system OEM codepage (GBK/936) for console output,
-            // which mismatches with the UTF-8 StreamReader and causes garbled text.
+            // Use -EncodedCommand to set UTF-8 output encoding before running the script.
+            // On Chinese Windows, pwsh defaults to OEM codepage (GBK/936) for redirected stdout,
+            // causing CJK characters to become '??' when read as UTF-8.
+            // Use *>&1 to merge ALL PowerShell streams (including Write-Host / Information stream)
+            // into stdout as plain text, preventing CLIXML serialization on stderr.
             var escapedPath = scriptPath.Replace("'", "''");
             var psCommand = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
                             "$OutputEncoding = [System.Text.Encoding]::UTF8; " +
@@ -231,9 +233,10 @@ public sealed class ScriptTaskService(
             {
                 psCommand += $" {runningTask.Task.Arguments}";
             }
-            psCommand += "; exit $LASTEXITCODE";
+            psCommand += " *>&1; exit $LASTEXITCODE";
 
-            var encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(psCommand));
+            var encodedCommand = Convert.ToBase64String(
+                System.Text.Encoding.Unicode.GetBytes(psCommand));
             var arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}";
 
             // Display-friendly version for the terminal UI
@@ -267,10 +270,13 @@ public sealed class ScriptTaskService(
 
             process.Start();
 
+            // All PS streams are merged to stdout via *>&1
             var stdoutTask = ReadStreamAsync(process.StandardOutput, executionId, cancellationToken);
-            var stderrTask = ReadStreamAsync(process.StandardError, executionId, cancellationToken, isError: true);
+            // Drain stderr to prevent buffer deadlock (should be empty thanks to *>&1)
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-            await Task.WhenAll(stdoutTask, stderrTask);
+            await stdoutTask;
+            await stderrTask;
             await process.WaitForExitAsync(cancellationToken);
 
             runningTask.ExitCode = process.ExitCode;
