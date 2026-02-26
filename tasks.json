@@ -1,0 +1,108 @@
+{
+  // RepoOPS 任务配置
+  // 编辑此文件以定义你的任务。
+  // 修改后请重启应用或点击刷新按钮。
+
+  // 脚本基础路径，用于解析相对路径（相对于 exe 所在目录）
+  "scriptsBasePath": "scripts",
+
+  // 所有脚本的默认工作目录（可选）
+  "defaultWorkingDirectory": null,
+
+  // 左侧面板显示的任务分组
+  "groups": [
+    {
+      "name": "项目 Alpha - Android",
+      "icon": "📱",
+      "tasks": [
+        {
+          "id": "alpha-android-build",
+          "name": "构建 Android APK",
+          "description": "为项目 Alpha 构建 Android APK",
+          "script": "examples/build-android.ps1",
+          "arguments": "-ProjectName Alpha -BuildType Debug",
+          "icon": "🔨"
+        },
+        {
+          "id": "alpha-android-release",
+          "name": "构建 Android 正式版",
+          "description": "构建带签名的 Android 正式版 APK",
+          "script": "examples/build-android.ps1",
+          "arguments": "-ProjectName Alpha -BuildType Release",
+          "icon": "🚀"
+        }
+      ]
+    },
+    {
+      "name": "项目 Alpha - 桌面端",
+      "icon": "🖥️",
+      "tasks": [
+        {
+          "id": "alpha-desktop-build",
+          "name": "构建桌面应用",
+          "description": "为项目 Alpha 构建桌面应用",
+          "script": "examples/build-desktop.ps1",
+          "arguments": "-ProjectName Alpha",
+          "icon": "🔨"
+        },
+        {
+          "id": "alpha-all-platforms",
+          "name": "构建所有平台",
+          "description": "同时为项目 Alpha 构建 Android 和桌面端",
+          "script": "examples/build-all.ps1",
+          "arguments": "-ProjectName Alpha",
+          "icon": "📦"
+        }
+      ]
+    },
+    {
+      "name": "项目 Beta",
+      "icon": "🅱️",
+      "tasks": [
+        {
+          "id": "beta-android-build",
+          "name": "构建 Android APK",
+          "description": "为项目 Beta 构建 Android APK",
+          "script": "examples/build-android.ps1",
+          "arguments": "-ProjectName Beta -BuildType Debug",
+          "icon": "🔨"
+        },
+        {
+          "id": "beta-release",
+          "name": "构建发布包",
+          "description": "为项目 Beta 构建完整发布包",
+          "script": "examples/build-release.ps1",
+          "arguments": "-ProjectName Beta",
+          "icon": "📦"
+        }
+      ]
+    },
+    {
+      "name": "实用工具",
+      "icon": "🔧",
+      "tasks": [
+        {
+          "id": "util-clean",
+          "name": "清理构建产物",
+          "description": "删除所有构建产物和临时文件",
+          "script": "examples/clean-artifacts.ps1",
+          "icon": "🧹"
+        },
+        {
+          "id": "util-system-info",
+          "name": "系统信息",
+          "description": "显示系统信息和环境详情",
+          "script": "examples/system-info.ps1",
+          "icon": "ℹ️"
+        },
+        {
+          "id": "util-long-running",
+          "name": "长时间运行任务（演示）",
+          "description": "一个运行 30 秒并输出进度的演示任务",
+          "script": "examples/long-running.ps1",
+          "icon": "⏳"
+        }
+      ]
+    }
+  ]
+}

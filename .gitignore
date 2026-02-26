@@ -1,0 +1,14 @@
+src/**/bin/
+src/**/obj/
+publish/
+*.user
+*.pdb
+.vs/
+docs/
+
+# ASP.NET Core 自动生成
+*.staticwebassets.endpoints.json
+
+# 构建时生成的压缩文件
+*.br
+*.gz
