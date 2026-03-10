@@ -17,6 +17,15 @@ let isClosingAllTabs = false;
 
 /** Current context-menu target task */
 let contextMenuTaskId = null;
+let contextMenuGroupIndex = -1;
+let contextMenuTaskIndex = -1;
+
+/** Current loaded task config */
+let currentTaskConfig = null;
+
+/** Drag state for task list */
+let draggedTaskMeta = null;
+let suppressTaskClickUntil = 0;
 
 const themePalettes = {
     light: {
@@ -214,6 +223,7 @@ async function loadConfig() {
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
+        currentTaskConfig = config;
         renderTaskList(config);
     } catch (err) {
         console.error('Failed to load config:', err);
@@ -246,13 +256,13 @@ function renderTaskList(config) {
         html += `<span class="group-icon">${icon}</span>`;
         html += `<span>${escapeHtml(group.name)}</span>`;
         html += `</div>`;
-        html += `<div class="task-group-items" id="${groupId}">`;
+        html += `<div class="task-group-items" id="${groupId}" data-group-index="${groupIndex}">`;
 
         if (group.tasks) {
-            group.tasks.forEach(task => {
+            group.tasks.forEach((task, taskIndex) => {
                 const icon = task.icon || '▶️';
                 const desc = task.description ? `title="${escapeHtml(task.description)}"` : '';
-                html += `<div class="task-item" ${desc} data-task-id="${escapeHtml(task.id)}" onclick="runTask('${escapeHtml(task.id)}', '${escapeHtml(task.name)}')">`;
+                html += `<div class="task-item" draggable="true" ${desc} data-group-index="${groupIndex}" data-task-index="${taskIndex}" data-task-id="${escapeHtml(task.id)}" data-task-name="${escapeHtml(task.name)}">`;
                 html += `<span class="task-icon">${icon}</span>`;
                 html += `<span class="task-name">${escapeHtml(task.name)}</span>`;
                 html += `</div>`;
@@ -268,21 +278,117 @@ function renderTaskList(config) {
 
 function attachTaskListEvents(container) {
     container.querySelectorAll('.task-item').forEach(taskItem => {
+        taskItem.addEventListener('click', () => {
+            if (Date.now() < suppressTaskClickUntil) {
+                return;
+            }
+
+            const taskId = taskItem.getAttribute('data-task-id');
+            const taskName = taskItem.getAttribute('data-task-name');
+            if (!taskId || !taskName) {
+                return;
+            }
+
+            runTask(taskId, taskName);
+        });
+
         taskItem.addEventListener('contextmenu', (event) => {
             event.preventDefault();
             event.stopPropagation();
 
             const taskId = taskItem.getAttribute('data-task-id');
+            const groupIndex = Number.parseInt(taskItem.getAttribute('data-group-index') || '-1', 10);
+            const taskIndex = Number.parseInt(taskItem.getAttribute('data-task-index') || '-1', 10);
             if (!taskId) {
                 return;
             }
 
-            showTaskContextMenu(event.clientX, event.clientY, taskId, taskItem);
+            showTaskContextMenu(event.clientX, event.clientY, taskId, taskItem, groupIndex, taskIndex);
+        });
+
+        taskItem.addEventListener('dragstart', (event) => {
+            const groupIndex = Number.parseInt(taskItem.getAttribute('data-group-index') || '-1', 10);
+            const taskIndex = Number.parseInt(taskItem.getAttribute('data-task-index') || '-1', 10);
+            if (groupIndex < 0 || taskIndex < 0) {
+                event.preventDefault();
+                return;
+            }
+
+            draggedTaskMeta = { sourceGroupIndex: groupIndex, sourceTaskIndex: taskIndex };
+            taskItem.classList.add('dragging');
+
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', taskItem.getAttribute('data-task-id') || 'drag-task');
+            }
+
+            hideTaskContextMenu();
+        });
+
+        taskItem.addEventListener('dragend', () => {
+            taskItem.classList.remove('dragging');
+            draggedTaskMeta = null;
+            suppressTaskClickUntil = Date.now() + 200;
+
+            container.querySelectorAll('.task-group-items.drag-over').forEach(groupItems => {
+                groupItems.classList.remove('drag-over');
+            });
+        });
+    });
+
+    container.querySelectorAll('.task-group-items').forEach(groupItems => {
+        groupItems.addEventListener('dragover', (event) => {
+            if (!draggedTaskMeta) {
+                return;
+            }
+
+            event.preventDefault();
+            groupItems.classList.add('drag-over');
+
+            const draggingItem = container.querySelector('.task-item.dragging');
+            if (!draggingItem) {
+                return;
+            }
+
+            const afterElement = getTaskItemAfterPointer(groupItems, event.clientY);
+            if (!afterElement) {
+                groupItems.appendChild(draggingItem);
+            } else if (afterElement !== draggingItem) {
+                groupItems.insertBefore(draggingItem, afterElement);
+            }
+        });
+
+        groupItems.addEventListener('drop', async (event) => {
+            if (!draggedTaskMeta || !currentTaskConfig || !Array.isArray(currentTaskConfig.groups)) {
+                return;
+            }
+
+            event.preventDefault();
+            groupItems.classList.remove('drag-over');
+
+            const targetGroupIndex = Number.parseInt(groupItems.getAttribute('data-group-index') || '-1', 10);
+            const draggingItem = container.querySelector('.task-item.dragging');
+            if (targetGroupIndex < 0 || !draggingItem) {
+                return;
+            }
+
+            const targetTaskIndex = Array.from(groupItems.querySelectorAll('.task-item')).indexOf(draggingItem);
+            if (targetTaskIndex < 0) {
+                return;
+            }
+
+            await moveTaskAndPersist(draggedTaskMeta.sourceGroupIndex, draggedTaskMeta.sourceTaskIndex, targetGroupIndex, targetTaskIndex);
+        });
+
+        groupItems.addEventListener('dragleave', (event) => {
+            if (!groupItems.contains(event.relatedTarget)) {
+                groupItems.classList.remove('drag-over');
+            }
         });
     });
 }
 
-function showTaskContextMenu(x, y, taskId, taskItem) {
+function showTaskContextMenu(x, y, taskId, taskItem, groupIndex, taskIndex) {
     const menu = document.getElementById('taskContextMenu');
     if (!menu) {
         return;
@@ -291,6 +397,8 @@ function showTaskContextMenu(x, y, taskId, taskItem) {
     hideTaskContextMenu();
 
     contextMenuTaskId = taskId;
+    contextMenuGroupIndex = Number.isFinite(groupIndex) ? groupIndex : -1;
+    contextMenuTaskIndex = Number.isFinite(taskIndex) ? taskIndex : -1;
     taskItem.classList.add('context-target');
 
     menu.hidden = false;
@@ -315,6 +423,8 @@ function hideTaskContextMenu() {
     });
 
     contextMenuTaskId = null;
+    contextMenuGroupIndex = -1;
+    contextMenuTaskIndex = -1;
 }
 
 function editTaskFromContextMenu() {
@@ -326,6 +436,122 @@ function editTaskFromContextMenu() {
     }
 
     ConfigEditor.openTask(taskId);
+}
+
+async function copyTaskFromContextMenu() {
+    if (!currentTaskConfig || !Array.isArray(currentTaskConfig.groups)) {
+        hideTaskContextMenu();
+        return;
+    }
+
+    const sourceGroup = currentTaskConfig.groups[contextMenuGroupIndex];
+    const sourceTask = sourceGroup?.tasks?.[contextMenuTaskIndex];
+    hideTaskContextMenu();
+
+    if (!sourceTask) {
+        return;
+    }
+
+    const clonedTask = {
+        ...sourceTask,
+        id: sourceTask.id ? `${sourceTask.id}-copy` : '',
+        name: sourceTask.name ? `${sourceTask.name} (副本)` : ''
+    };
+
+    sourceGroup.tasks.splice(contextMenuTaskIndex + 1, 0, clonedTask);
+    await saveTaskConfigAndReload();
+}
+
+async function deleteTaskFromContextMenu() {
+    if (!currentTaskConfig || !Array.isArray(currentTaskConfig.groups)) {
+        hideTaskContextMenu();
+        return;
+    }
+
+    const sourceGroup = currentTaskConfig.groups[contextMenuGroupIndex];
+    const sourceTask = sourceGroup?.tasks?.[contextMenuTaskIndex];
+    hideTaskContextMenu();
+
+    if (!sourceTask) {
+        return;
+    }
+
+    if (!confirm(I18n.t('menu.confirmDeleteTask'))) {
+        return;
+    }
+
+    sourceGroup.tasks.splice(contextMenuTaskIndex, 1);
+    await saveTaskConfigAndReload();
+}
+
+function getTaskItemAfterPointer(groupItems, pointerY) {
+    const siblings = Array.from(groupItems.querySelectorAll('.task-item:not(.dragging)'));
+
+    let closest = {
+        offset: Number.NEGATIVE_INFINITY,
+        element: null
+    };
+
+    siblings.forEach(taskItem => {
+        const box = taskItem.getBoundingClientRect();
+        const offset = pointerY - box.top - box.height / 2;
+
+        if (offset < 0 && offset > closest.offset) {
+            closest = { offset, element: taskItem };
+        }
+    });
+
+    return closest.element;
+}
+
+async function moveTaskAndPersist(sourceGroupIndex, sourceTaskIndex, targetGroupIndex, targetTaskIndex) {
+    if (!currentTaskConfig || !Array.isArray(currentTaskConfig.groups)) {
+        return;
+    }
+
+    const sourceGroup = currentTaskConfig.groups[sourceGroupIndex];
+    const targetGroup = currentTaskConfig.groups[targetGroupIndex];
+    if (!sourceGroup || !targetGroup || !Array.isArray(sourceGroup.tasks) || !Array.isArray(targetGroup.tasks)) {
+        return;
+    }
+
+    if (sourceTaskIndex < 0 || sourceTaskIndex >= sourceGroup.tasks.length) {
+        return;
+    }
+
+    const [movingTask] = sourceGroup.tasks.splice(sourceTaskIndex, 1);
+    if (!movingTask) {
+        return;
+    }
+
+    let normalizedTargetIndex = targetTaskIndex;
+    if (sourceGroupIndex === targetGroupIndex && sourceTaskIndex < normalizedTargetIndex) {
+        normalizedTargetIndex -= 1;
+    }
+
+    normalizedTargetIndex = Math.max(0, Math.min(normalizedTargetIndex, targetGroup.tasks.length));
+    targetGroup.tasks.splice(normalizedTargetIndex, 0, movingTask);
+
+    await saveTaskConfigAndReload();
+}
+
+async function saveTaskConfigAndReload() {
+    try {
+        const response = await fetch('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentTaskConfig)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Save failed with status ${response.status}`);
+        }
+
+        await loadConfig();
+    } catch (err) {
+        console.error('Failed to save task config:', err);
+        alert(I18n.t('menu.saveConfigFailed'));
+    }
 }
 
 function toggleGroup(groupId) {

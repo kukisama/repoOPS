@@ -243,6 +243,11 @@ body {
     transition: max-height 0.2s ease-out;
 }
 
+.task-group-items.drag-over {
+    background: var(--surface-hover);
+    box-shadow: inset 0 0 0 1px var(--accent-color);
+}
+
 .task-group-items.collapsed {
     max-height: 0 !important;
 }
@@ -265,6 +270,11 @@ body {
 
 .task-item.context-target {
     background-color: var(--bg-active);
+}
+
+.task-item.dragging {
+    opacity: 0.65;
+    cursor: grabbing;
 }
 
 .task-item.running {
@@ -364,6 +374,11 @@ body {
 
 .task-context-menu-item:hover {
     background: var(--bg-hover);
+}
+
+.task-context-menu-item-danger:hover {
+    background: rgba(241, 76, 76, 0.2);
+    color: var(--error-color);
 }
 
 /* ===== Resize Handle ===== */

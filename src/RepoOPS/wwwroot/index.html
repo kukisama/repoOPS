@@ -38,6 +38,8 @@
                 </div>
                 <div class="task-context-menu" id="taskContextMenu" hidden>
                     <button class="task-context-menu-item" type="button" id="btnTaskEdit" onclick="editTaskFromContextMenu()" data-i18n="menu.editTask">✏️ 编辑</button>
+                    <button class="task-context-menu-item" type="button" id="btnTaskCopy" onclick="copyTaskFromContextMenu()" data-i18n="menu.copyTask">📋 复制</button>
+                    <button class="task-context-menu-item task-context-menu-item-danger" type="button" id="btnTaskDelete" onclick="deleteTaskFromContextMenu()" data-i18n="menu.deleteTask">🗑️ 删除</button>
                 </div>
                 <div class="panel-footer">
                     <div class="running-tasks" id="runningTasksInfo">
