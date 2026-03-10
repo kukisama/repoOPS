@@ -16,6 +16,7 @@
                 <span class="header-subtitle" data-i18n="app.subtitle">Script Task Runner</span>
             </div>
             <div class="header-right">
+                <button id="btnThemeSwitch" class="btn-theme" onclick="Theme.toggleTheme()" title="切换主题">☀️ 明亮</button>
                 <button id="btnLangSwitch" class="btn-lang" onclick="I18n.toggleLanguage()">中文</button>
                 <span id="connectionStatus" class="status-indicator status-disconnected" data-i18n="status.disconnected">● Disconnected</span>
             </div>
@@ -34,6 +35,9 @@
                 </div>
                 <div class="task-list" id="taskList">
                     <div class="loading" data-i18n="loading.tasks">Loading tasks...</div>
+                </div>
+                <div class="task-context-menu" id="taskContextMenu" hidden>
+                    <button class="task-context-menu-item" type="button" id="btnTaskEdit" onclick="editTaskFromContextMenu()" data-i18n="menu.editTask">✏️ 编辑</button>
                 </div>
                 <div class="panel-footer">
                     <div class="running-tasks" id="runningTasksInfo">
@@ -54,6 +58,7 @@
                     </div>
                     <div class="output-actions">
                         <button class="btn-icon" onclick="clearCurrentTerminal()" data-i18n-title="btn.clear" title="Clear output">🗑️</button>
+                        <button class="btn-icon btn-danger" onclick="closeAllTabs()" data-i18n-title="btn.closeAll" title="Close all tasks" id="btnCloseAllTabs" disabled>❎</button>
                         <button class="btn-icon btn-danger" onclick="stopCurrentTask()" data-i18n-title="btn.stop" title="Stop current task" id="btnStop" disabled>⏹️</button>
                     </div>
                 </div>

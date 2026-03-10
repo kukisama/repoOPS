@@ -3,6 +3,20 @@
 const ConfigEditor = (() => {
     let currentConfig = null;
     let isOpen = false;
+    let pendingFocusTaskId = null;
+    let currentIconInput = null;
+    const recentIconsStorageKey = 'repoops-recent-icons';
+
+    const iconCategories = [
+        { key: 'common', icons: ['📁', '📂', '📦', '🗂️', '⭐', '📝', '📋', '✅', '❌', '⚠️', '🔥', '🧩'] },
+        { key: 'build', icons: ['🛠️', '⚙️', '🔧', '🔨', '🏗️', '📦', '🧪', '🚀'] },
+        { key: 'run', icons: ['▶️', '⏹️', '⏯️', '🔄', '⏱️', '✅', '🚀', '🔥'] },
+        { key: 'project', icons: ['💻', '🖥️', '📁', '📦', '🗃️', '📋', '📝', '🔒'] },
+        { key: 'device', icons: ['📱', '⌚', '🖨️', '🎮', '🧷', '💾', '🔌', '🔋'] },
+        { key: 'network', icons: ['🌐', '☁️', '📡', '📤', '📥', '🔗', '🛰️', '🔐'] }
+    ];
+
+    const iconSuggestions = Array.from(new Set(iconCategories.flatMap(category => category.icons)));
 
     function open() {
         if (isOpen) return;
@@ -10,8 +24,22 @@ const ConfigEditor = (() => {
         loadAndShow();
     }
 
+    function openTask(taskId) {
+        pendingFocusTaskId = taskId;
+
+        if (isOpen) {
+            focusPendingTask();
+            return;
+        }
+
+        isOpen = true;
+        loadAndShow();
+    }
+
     function close() {
         isOpen = false;
+        pendingFocusTaskId = null;
+        currentIconInput = null;
         const overlay = document.getElementById('editorOverlay');
         if (overlay) overlay.remove();
     }
@@ -48,9 +76,11 @@ const ConfigEditor = (() => {
 
         // Attach group/task delete and add-task buttons
         attachGroupEvents(overlay);
+        attachIconPickerEvents(overlay);
 
         // Apply i18n to new elements
         I18n.applyTranslations();
+        focusPendingTask();
     }
 
     function buildEditorHTML() {
@@ -78,6 +108,8 @@ const ConfigEditor = (() => {
                     </div>
                 </div>
                 <div class="editor-body-content">
+                ${buildIconDatalistHTML()}
+                ${buildIconPickerHTML()}
                 <!-- Global Settings -->
                 <div class="editor-section">
                     <h3 data-i18n="editor.global">${t('editor.global')}</h3>
@@ -111,6 +143,76 @@ const ConfigEditor = (() => {
         </div>`;
     }
 
+    function buildIconDatalistHTML() {
+        const options = iconSuggestions
+            .map(icon => `<option value="${icon}">${icon}</option>`)
+            .join('');
+
+        return `<datalist id="iconSuggestions">${options}</datalist>`;
+    }
+
+    function buildIconPickerHTML() {
+        const t = I18n.t;
+
+        return `
+        <div class="editor-icon-picker" id="editorIconPicker" hidden>
+            <div class="editor-icon-picker-title" data-i18n="editor.iconPickerTitle">${t('editor.iconPickerTitle')}</div>
+            <input type="text" class="editor-icon-picker-search" id="editorIconPickerSearch"
+                data-i18n-placeholder="editor.iconSearchPlaceholder"
+                placeholder="${t('editor.iconSearchPlaceholder')}">
+            <div class="editor-icon-picker-body" id="editorIconPickerBody">
+                ${buildIconPickerSections('')}
+            </div>
+        </div>`;
+    }
+
+    function buildIconPickerSections(searchTerm) {
+        const t = I18n.t;
+        const normalized = (searchTerm || '').trim().toLowerCase();
+        const sections = [];
+
+        const recentIcons = getRecentIcons();
+        if (recentIcons.length > 0) {
+            const recentFiltered = filterIcons(recentIcons, normalized);
+            if (recentFiltered.length > 0) {
+                sections.push(buildIconSection(t('editor.iconRecent'), recentFiltered));
+            }
+        }
+
+        iconCategories.forEach(category => {
+            const filtered = filterIcons(category.icons, normalized);
+            if (filtered.length > 0) {
+                sections.push(buildIconSection(t(`editor.iconCategory${capitalize(category.key)}`), filtered));
+            }
+        });
+
+        if (sections.length === 0) {
+            return `<div class="editor-icon-picker-empty">${t('editor.iconNoResults')}</div>`;
+        }
+
+        return sections.join('');
+    }
+
+    function buildIconSection(title, icons) {
+        const items = icons
+            .map(icon => `<button type="button" class="editor-icon-option" data-icon="${icon}" title="${icon}">${icon}</button>`)
+            .join('');
+
+        return `
+        <div class="editor-icon-section">
+            <div class="editor-icon-section-title">${title}</div>
+            <div class="editor-icon-picker-grid">${items}</div>
+        </div>`;
+    }
+
+    function filterIcons(icons, searchTerm) {
+        if (!searchTerm) {
+            return Array.from(new Set(icons));
+        }
+
+        return Array.from(new Set(icons)).filter(icon => icon.includes(searchTerm));
+    }
+
     function buildGroupHTML(group, gi) {
         const t = I18n.t;
         let tasksHtml = '';
@@ -126,9 +228,13 @@ const ConfigEditor = (() => {
                 <div class="editor-group-fields">
                     <button class="editor-group-collapse-btn" title="折叠/展开">▼</button>
                     <div class="editor-field-inline">
-                        <input type="text" class="editor-input-icon group-icon" value="${escapeAttr(group.icon || '')}"
-                            data-i18n-placeholder="editor.groupIcon.placeholder"
-                            placeholder="${t('editor.groupIcon.placeholder')}">
+                        <div class="editor-icon-input-group">
+                            <input type="text" class="editor-input-icon group-icon" value="${escapeAttr(group.icon || '')}"
+                                list="iconSuggestions"
+                                data-i18n-placeholder="editor.groupIcon.placeholder"
+                                placeholder="${t('editor.groupIcon.placeholder')}">
+                            <button type="button" class="editor-icon-picker-trigger" data-i18n-title="editor.chooseIcon" title="${t('editor.chooseIcon')}">▾</button>
+                        </div>
                     </div>
                     <div class="editor-field-inline editor-field-grow">
                         <input type="text" class="group-name" value="${escapeAttr(group.name || '')}"
@@ -155,7 +261,9 @@ const ConfigEditor = (() => {
     function buildTaskHTML(task, gi, ti) {
         const t = I18n.t;
         return `
-        <div class="editor-task" data-group-index="${gi}" data-task-index="${ti}">
+        <div class="editor-task" data-group-index="${gi}" data-task-index="${ti}" data-task-id="${escapeAttr(task.id || '')}">
+            <input type="hidden" class="task-description" value="${escapeAttr(task.description || '')}">
+            <input type="hidden" class="task-workingDirectory" value="${escapeAttr(task.workingDirectory || '')}">
             <div class="editor-task-header">
                 <span class="editor-task-label">${escapeHtmlStr(task.name || `Task ${ti + 1}`)}</span>
                 <div class="editor-task-actions">
@@ -167,9 +275,13 @@ const ConfigEditor = (() => {
                 <div class="editor-field-row">
                     <div class="editor-field-inline">
                         <label data-i18n="editor.taskIcon">${t('editor.taskIcon')}</label>
-                        <input type="text" class="editor-input-icon task-icon" value="${escapeAttr(task.icon || '')}"
-                            data-i18n-placeholder="editor.taskIcon.placeholder"
-                            placeholder="${t('editor.taskIcon.placeholder')}">
+                        <div class="editor-icon-input-group">
+                            <input type="text" class="editor-input-icon task-icon" value="${escapeAttr(task.icon || '')}"
+                                list="iconSuggestions"
+                                data-i18n-placeholder="editor.taskIcon.placeholder"
+                                placeholder="${t('editor.taskIcon.placeholder')}">
+                            <button type="button" class="editor-icon-picker-trigger" data-i18n-title="editor.chooseIcon" title="${t('editor.chooseIcon')}">▾</button>
+                        </div>
                     </div>
                     <div class="editor-field-inline editor-field-grow">
                         <label data-i18n="editor.taskId">${t('editor.taskId')}</label>
@@ -186,14 +298,6 @@ const ConfigEditor = (() => {
                 </div>
                 <div class="editor-field-row">
                     <div class="editor-field-inline editor-field-grow">
-                        <label data-i18n="editor.taskDesc">${t('editor.taskDesc')}</label>
-                        <input type="text" class="task-description" value="${escapeAttr(task.description || '')}"
-                            data-i18n-placeholder="editor.taskDesc.placeholder"
-                            placeholder="${t('editor.taskDesc.placeholder')}">
-                    </div>
-                </div>
-                <div class="editor-field-row">
-                    <div class="editor-field-inline editor-field-grow">
                         <label data-i18n="editor.taskScript">${t('editor.taskScript')}</label>
                         <input type="text" class="task-script" value="${escapeAttr(task.script || '')}"
                             placeholder="${t('editor.taskScript.placeholder') || '脚本路径(.ps1)或命令名(adb/python/dotnet...)'}">
@@ -203,14 +307,6 @@ const ConfigEditor = (() => {
                         <input type="text" class="task-arguments" value="${escapeAttr(task.arguments || '')}"
                             data-i18n-placeholder="editor.taskArgs.placeholder"
                             placeholder="${t('editor.taskArgs.placeholder')}">
-                    </div>
-                </div>
-                <div class="editor-field-row">
-                    <div class="editor-field-inline editor-field-grow">
-                        <label data-i18n="editor.taskWorkDir">${t('editor.taskWorkDir')}</label>
-                        <input type="text" class="task-workingDirectory" value="${escapeAttr(task.workingDirectory || '')}"
-                            data-i18n-placeholder="editor.taskWorkDir.placeholder"
-                            placeholder="${t('editor.taskWorkDir.placeholder')}">
                     </div>
                 </div>
             </div>
@@ -285,9 +381,55 @@ const ConfigEditor = (() => {
                 const newTask = tempDiv.firstElementChild;
                 taskList.appendChild(newTask);
                 attachTaskEvents(newTask);
+                attachIconPickerEvents(newTask);
                 I18n.applyTranslations();
             };
         });
+    }
+
+    function attachIconPickerEvents(container) {
+        container.querySelectorAll('.editor-icon-picker-trigger').forEach(btn => {
+            btn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const input = this.closest('.editor-icon-input-group')?.querySelector('input');
+                if (!input) {
+                    return;
+                }
+
+                toggleIconPicker(this, input);
+            };
+        });
+
+        const picker = document.getElementById('editorIconPicker');
+        if (picker && !picker.dataset.bound) {
+            picker.dataset.bound = 'true';
+            const searchInput = picker.querySelector('#editorIconPickerSearch');
+            const body = picker.querySelector('#editorIconPickerBody');
+
+            searchInput?.addEventListener('input', () => {
+                rerenderIconPicker(searchInput.value);
+            });
+
+            body?.addEventListener('click', (e) => {
+                const option = e.target.closest('.editor-icon-option');
+                if (!option) {
+                    return;
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+                applyPickedIcon(option.getAttribute('data-icon') || '');
+            });
+
+            const overlay = document.getElementById('editorOverlay');
+            overlay?.addEventListener('click', (event) => {
+                if (!event.target.closest('.editor-icon-picker') && !event.target.closest('.editor-icon-picker-trigger')) {
+                    closeIconPicker();
+                }
+            });
+        }
     }
 
     function readTaskFromDOM(taskEl) {
@@ -319,6 +461,7 @@ const ConfigEditor = (() => {
             const cloned = tempDiv.firstElementChild;
             taskEl.after(cloned);
             attachTaskEvents(cloned);
+            attachIconPickerEvents(cloned);
             I18n.applyTranslations();
         };
     }
@@ -333,6 +476,7 @@ const ConfigEditor = (() => {
         groupsContainer.appendChild(newGroup);
         // Attach events
         attachGroupEvents(newGroup);
+        attachIconPickerEvents(newGroup);
         I18n.applyTranslations();
     }
 
@@ -431,5 +575,151 @@ const ConfigEditor = (() => {
         return div.innerHTML;
     }
 
-    return { open, close };
+    function focusPendingTask() {
+        if (!pendingFocusTaskId) {
+            return;
+        }
+
+        if (focusTaskCard(pendingFocusTaskId)) {
+            pendingFocusTaskId = null;
+        }
+    }
+
+    function focusTaskCard(taskId) {
+        const taskEls = Array.from(document.querySelectorAll('.editor-task'));
+        const taskEl = taskEls.find(el => el.getAttribute('data-task-id') === taskId);
+        if (!taskEl) {
+            return false;
+        }
+
+        document.querySelectorAll('.editor-task.editor-task-target').forEach(el => {
+            el.classList.remove('editor-task-target');
+        });
+
+        const groupEl = taskEl.closest('.editor-group');
+        const body = groupEl?.querySelector('.editor-group-body');
+        const collapseBtn = groupEl?.querySelector('.editor-group-collapse-btn');
+
+        if (body && body.classList.contains('collapsed')) {
+            body.classList.remove('collapsed');
+            collapseBtn?.classList.remove('collapsed');
+        }
+
+        taskEl.classList.add('editor-task-target');
+        taskEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        const focusInput = taskEl.querySelector('.task-name') || taskEl.querySelector('.task-id');
+        focusInput?.focus();
+
+        setTimeout(() => {
+            taskEl.classList.remove('editor-task-target');
+        }, 2200);
+
+        return true;
+    }
+
+    function toggleIconPicker(trigger, input) {
+        const picker = document.getElementById('editorIconPicker');
+        const searchInput = document.getElementById('editorIconPickerSearch');
+        if (!picker) {
+            return;
+        }
+
+        if (!picker.hidden && currentIconInput === input) {
+            closeIconPicker();
+            return;
+        }
+
+        currentIconInput = input;
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        rerenderIconPicker('');
+        highlightSelectedIcon(input.value);
+
+        picker.hidden = false;
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const pickerWidth = Math.min(420, window.innerWidth - 24);
+        const pickerHeight = Math.min(520, window.innerHeight - 24);
+        const left = Math.max(8, Math.min(triggerRect.left, window.innerWidth - pickerWidth - 12));
+        const top = Math.max(8, Math.min(triggerRect.bottom + 8, window.innerHeight - pickerHeight - 12));
+
+        picker.style.left = `${left}px`;
+        picker.style.top = `${top}px`;
+        searchInput?.focus();
+    }
+
+    function closeIconPicker() {
+        const picker = document.getElementById('editorIconPicker');
+        const searchInput = document.getElementById('editorIconPickerSearch');
+        if (picker) {
+            picker.hidden = true;
+        }
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        currentIconInput = null;
+    }
+
+    function highlightSelectedIcon(selectedIcon) {
+        document.querySelectorAll('.editor-icon-option').forEach(option => {
+            option.classList.toggle('active', option.getAttribute('data-icon') === selectedIcon);
+        });
+    }
+
+    function applyPickedIcon(icon) {
+        if (!currentIconInput) {
+            return;
+        }
+
+        currentIconInput.value = icon;
+        currentIconInput.dispatchEvent(new Event('input', { bubbles: true }));
+        saveRecentIcon(icon);
+        currentIconInput.focus();
+        closeIconPicker();
+    }
+
+    function rerenderIconPicker(searchTerm) {
+        const body = document.getElementById('editorIconPickerBody');
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = buildIconPickerSections(searchTerm);
+        if (currentIconInput) {
+            highlightSelectedIcon(currentIconInput.value);
+        }
+    }
+
+    function getRecentIcons() {
+        try {
+            const raw = localStorage.getItem(recentIconsStorageKey);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed.filter(Boolean).slice(0, 12) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function saveRecentIcon(icon) {
+        if (!icon) {
+            return;
+        }
+
+        const recent = getRecentIcons().filter(item => item !== icon);
+        recent.unshift(icon);
+
+        try {
+            localStorage.setItem(recentIconsStorageKey, JSON.stringify(recent.slice(0, 12)));
+        } catch {
+            // ignore storage errors
+        }
+    }
+
+    function capitalize(text) {
+        return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
+    return { open, openTask, close };
 })();

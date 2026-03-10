@@ -12,6 +12,133 @@ let activeTabId = null;
 /** Running task count */
 let runningCount = 0;
 
+/** Whether all tabs are being closed */
+let isClosingAllTabs = false;
+
+/** Current context-menu target task */
+let contextMenuTaskId = null;
+
+const themePalettes = {
+    light: {
+        terminal: {
+            background: '#f5f7fb',
+            foreground: '#1f2937',
+            cursor: '#0a66d4',
+            cursorAccent: '#f5f7fb',
+            selectionBackground: 'rgba(10, 102, 212, 0.2)',
+            black: '#1f2937',
+            red: '#cf222e',
+            green: '#1a7f37',
+            yellow: '#9a6700',
+            blue: '#0969da',
+            magenta: '#8250df',
+            cyan: '#1b7c83',
+            white: '#6e7781',
+            brightBlack: '#57606a',
+            brightRed: '#a40e26',
+            brightGreen: '#116329',
+            brightYellow: '#7d4e00',
+            brightBlue: '#0550ae',
+            brightMagenta: '#6639ba',
+            brightCyan: '#0f5d66',
+            brightWhite: '#111827'
+        }
+    },
+    dark: {
+        terminal: {
+            background: '#1e1e1e',
+            foreground: '#cccccc',
+            cursor: '#cccccc',
+            cursorAccent: '#1e1e1e',
+            selectionBackground: 'rgba(0, 120, 212, 0.3)',
+            black: '#1e1e1e',
+            red: '#f14c4c',
+            green: '#4ec965',
+            yellow: '#e8a838',
+            blue: '#3794ff',
+            magenta: '#bc3fbc',
+            cyan: '#29b8db',
+            white: '#cccccc',
+            brightBlack: '#666666',
+            brightRed: '#f14c4c',
+            brightGreen: '#4ec965',
+            brightYellow: '#e8a838',
+            brightBlue: '#3794ff',
+            brightMagenta: '#bc3fbc',
+            brightCyan: '#29b8db',
+            brightWhite: '#ffffff'
+        }
+    }
+};
+
+const Theme = (() => {
+    let currentTheme = 'light';
+
+    function detectTheme() {
+        const saved = localStorage.getItem('repoops-theme');
+        if (saved === 'light' || saved === 'dark') {
+            return saved;
+        }
+
+        return 'light';
+    }
+
+    function init() {
+        setTheme(detectTheme(), false);
+    }
+
+    function setTheme(theme, persist = true) {
+        if (!themePalettes[theme]) {
+            theme = 'light';
+        }
+
+        currentTheme = theme;
+        document.documentElement.setAttribute('data-theme', theme);
+
+        if (persist) {
+            localStorage.setItem('repoops-theme', theme);
+        }
+
+        applyTerminalTheme();
+        updateToggleButton();
+    }
+
+    function toggleTheme() {
+        setTheme(currentTheme === 'light' ? 'dark' : 'light');
+    }
+
+    function getTheme() {
+        return currentTheme;
+    }
+
+    function getTerminalTheme() {
+        return themePalettes[currentTheme].terminal;
+    }
+
+    function applyTerminalTheme() {
+        terminals.forEach(info => {
+            if (info && info.terminal) {
+                info.terminal.options.theme = getTerminalTheme();
+            }
+        });
+    }
+
+    function updateToggleButton() {
+        const btn = document.getElementById('btnThemeSwitch');
+        if (!btn || typeof I18n === 'undefined' || typeof I18n.t !== 'function') {
+            return;
+        }
+
+        const isLight = currentTheme === 'light';
+        btn.textContent = I18n.t(isLight ? 'theme.switchToDark' : 'theme.switchToLight');
+        btn.title = I18n.t(isLight ? 'theme.switchTitleToDark' : 'theme.switchTitleToLight');
+    }
+
+    return { init, setTheme, toggleTheme, getTheme, getTerminalTheme, updateToggleButton };
+})();
+
+window.Theme = Theme;
+
 // ===== SignalR Connection =====
 
 function initConnection() {
@@ -136,6 +263,69 @@ function renderTaskList(config) {
     });
 
     container.innerHTML = html;
+    attachTaskListEvents(container);
+}
+
+function attachTaskListEvents(container) {
+    container.querySelectorAll('.task-item').forEach(taskItem => {
+        taskItem.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const taskId = taskItem.getAttribute('data-task-id');
+            if (!taskId) {
+                return;
+            }
+
+            showTaskContextMenu(event.clientX, event.clientY, taskId, taskItem);
+        });
+    });
+}
+
+function showTaskContextMenu(x, y, taskId, taskItem) {
+    const menu = document.getElementById('taskContextMenu');
+    if (!menu) {
+        return;
+    }
+
+    hideTaskContextMenu();
+
+    contextMenuTaskId = taskId;
+    taskItem.classList.add('context-target');
+
+    menu.hidden = false;
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    const rect = menu.getBoundingClientRect();
+    const maxLeft = window.innerWidth - rect.width - 8;
+    const maxTop = window.innerHeight - rect.height - 8;
+    menu.style.left = `${Math.max(8, Math.min(x, maxLeft))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, maxTop))}px`;
+}
+
+function hideTaskContextMenu() {
+    const menu = document.getElementById('taskContextMenu');
+    if (menu) {
+        menu.hidden = true;
+    }
+
+    document.querySelectorAll('.task-item.context-target').forEach(el => {
+        el.classList.remove('context-target');
+    });
+
+    contextMenuTaskId = null;
+}
+
+function editTaskFromContextMenu() {
+    const taskId = contextMenuTaskId;
+    hideTaskContextMenu();
+
+    if (!taskId || typeof ConfigEditor === 'undefined' || typeof ConfigEditor.openTask !== 'function') {
+        return;
+    }
+
+    ConfigEditor.openTask(taskId);
 }
 
 function toggleGroup(groupId) {
@@ -196,6 +386,25 @@ async function stopTask(executionId) {
     }
 }
 
+async function closeAllTabs() {
+    if (isClosingAllTabs || terminals.size === 0) {
+        return;
+    }
+
+    isClosingAllTabs = true;
+    updateStopButton();
+
+    try {
+        const executionIds = Array.from(terminals.keys());
+        for (const executionId of executionIds) {
+            await closeTab(executionId);
+        }
+    } finally {
+        isClosingAllTabs = false;
+        updateStopButton();
+    }
+}
+
 // ===== Terminal Management =====
 
 function createTerminalTab(executionId, taskName, taskId) {
@@ -204,29 +413,7 @@ function createTerminalTab(executionId, taskName, taskId) {
 
     // Create terminal instance
     const terminal = new Terminal({
-        theme: {
-            background: '#1e1e1e',
-            foreground: '#cccccc',
-            cursor: '#cccccc',
-            cursorAccent: '#1e1e1e',
-            selectionBackground: 'rgba(0, 120, 212, 0.3)',
-            black: '#1e1e1e',
-            red: '#f14c4c',
-            green: '#4ec965',
-            yellow: '#e8a838',
-            blue: '#3794ff',
-            magenta: '#bc3fbc',
-            cyan: '#29b8db',
-            white: '#cccccc',
-            brightBlack: '#666666',
-            brightRed: '#f14c4c',
-            brightGreen: '#4ec965',
-            brightYellow: '#e8a838',
-            brightBlue: '#3794ff',
-            brightMagenta: '#bc3fbc',
-            brightCyan: '#29b8db',
-            brightWhite: '#ffffff'
-        },
+        theme: Theme.getTerminalTheme(),
         fontFamily: 'Consolas, "Courier New", monospace',
         fontSize: 14,
         lineHeight: 1.2,
@@ -296,6 +483,7 @@ function addTab(executionId, taskName) {
     `;
 
     tabBar.appendChild(tab);
+    updateStopButton();
 }
 
 function switchTab(executionId) {
@@ -375,13 +563,24 @@ function updateTabStatus(executionId, status) {
 }
 
 function updateStopButton() {
-    const btn = document.getElementById('btnStop');
-    if (!activeTabId) {
-        btn.disabled = true;
+    const stopBtn = document.getElementById('btnStop');
+    const closeAllBtn = document.getElementById('btnCloseAllTabs');
+
+    if (closeAllBtn) {
+        closeAllBtn.disabled = isClosingAllTabs || terminals.size === 0;
+    }
+
+    if (!stopBtn) {
         return;
     }
+
+    if (!activeTabId || isClosingAllTabs) {
+        stopBtn.disabled = true;
+        return;
+    }
+
     const info = terminals.get(activeTabId);
-    btn.disabled = !(info && info.isRunning);
+    stopBtn.disabled = !(info && info.isRunning);
 }
 
 // ===== Task Item Status =====
@@ -440,6 +639,7 @@ function initResizeHandle() {
 function initWindowResize() {
     let resizeTimeout;
     window.addEventListener('resize', () => {
+        hideTaskContextMenu();
         clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
             terminals.forEach((info) => {
@@ -467,8 +667,22 @@ function escapeHtml(text) {
 
 document.addEventListener('DOMContentLoaded', () => {
     I18n.init();
+    Theme.init();
     initConnection();
     loadConfig();
     initResizeHandle();
     initWindowResize();
+
+    document.addEventListener('click', hideTaskContextMenu);
+    document.addEventListener('scroll', hideTaskContextMenu, true);
+    document.addEventListener('contextmenu', (event) => {
+        if (!event.target.closest('.task-item') && !event.target.closest('#taskContextMenu')) {
+            hideTaskContextMenu();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            hideTaskContextMenu();
+        }
+    });
 });

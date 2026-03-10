@@ -14,9 +14,11 @@ const I18n = (() => {
             'panel.output': '📺 Output',
             'btn.refresh': 'Refresh task list',
             'btn.clear': 'Clear output',
+            'btn.closeAll': 'Close all tasks',
             'btn.stop': 'Stop current task',
             'btn.settings': 'Edit task configuration',
             'running.label': 'Running:',
+            'menu.editTask': '✏️ Edit',
             'loading.tasks': 'Loading tasks...',
             'loading.failed': 'Failed to load tasks. Check tasks.json configuration.',
             'no.tasks': 'No tasks configured. Click ⚙️ to add tasks.',
@@ -61,6 +63,17 @@ const I18n = (() => {
             'editor.taskWorkDir.placeholder': 'Optional override',
             'editor.taskIcon': 'Icon',
             'editor.taskIcon.placeholder': 'e.g. 🔨',
+            'editor.chooseIcon': 'Choose icon',
+            'editor.iconPickerTitle': 'Icon library',
+            'editor.iconSearchPlaceholder': 'Search icons...',
+            'editor.iconRecent': 'Recent',
+            'editor.iconCategoryCommon': 'Common',
+            'editor.iconCategoryBuild': 'Build',
+            'editor.iconCategoryRun': 'Run',
+            'editor.iconCategoryProject': 'Project',
+            'editor.iconCategoryDevice': 'Device',
+            'editor.iconCategoryNetwork': 'Network',
+            'editor.iconNoResults': 'No matching icons',
             'editor.deleteGroup': 'Delete this group',
             'editor.deleteTask': 'Delete this task',
             'editor.save': 'Save',
@@ -77,7 +90,13 @@ const I18n = (() => {
             'alert.startFailed': 'Failed to start task:',
 
             // Language
-            'lang.switch': '中文'
+            'lang.switch': '中文',
+
+            // Theme
+            'theme.switchToDark': '🌙 Dark',
+            'theme.switchToLight': '☀️ Light',
+            'theme.switchTitleToDark': 'Switch to dark theme',
+            'theme.switchTitleToLight': 'Switch to light theme'
         },
         'zh': {
             // Header
@@ -91,9 +110,11 @@ const I18n = (() => {
             'panel.output': '📺 输出',
             'btn.refresh': '刷新任务列表',
             'btn.clear': '清除输出',
+            'btn.closeAll': '关闭所有任务窗口',
             'btn.stop': '停止当前任务',
             'btn.settings': '编辑任务配置',
             'running.label': '运行中：',
+            'menu.editTask': '✏️ 编辑',
             'loading.tasks': '正在加载任务...',
             'loading.failed': '加载任务失败，请检查 tasks.json 配置。',
             'no.tasks': '暂无任务配置，点击 ⚙️ 添加任务。',
@@ -138,6 +159,17 @@ const I18n = (() => {
             'editor.taskWorkDir.placeholder': '可选，覆盖默认工作目录',
             'editor.taskIcon': '图标',
             'editor.taskIcon.placeholder': '例如 🔨',
+            'editor.chooseIcon': '选择图标',
+            'editor.iconPickerTitle': '图标库',
+            'editor.iconSearchPlaceholder': '搜索图标...',
+            'editor.iconRecent': '最近使用',
+            'editor.iconCategoryCommon': '常用',
+            'editor.iconCategoryBuild': '构建',
+            'editor.iconCategoryRun': '运行',
+            'editor.iconCategoryProject': '项目',
+            'editor.iconCategoryDevice': '设备',
+            'editor.iconCategoryNetwork': '网络',
+            'editor.iconNoResults': '没有匹配的图标',
             'editor.deleteGroup': '删除此分组',
             'editor.deleteTask': '删除此任务',
             'editor.save': '保存',
@@ -154,7 +186,13 @@ const I18n = (() => {
             'alert.startFailed': '启动任务失败：',
 
             // Language
-            'lang.switch': 'EN'
+            'lang.switch': 'EN',
+
+            // Theme
+            'theme.switchToDark': '🌙 深色',
+            'theme.switchToLight': '☀️ 明亮',
+            'theme.switchTitleToDark': '切换到深色主题',
+            'theme.switchTitleToLight': '切换到明亮主题'
         }
     };
 
@@ -222,6 +260,10 @@ const I18n = (() => {
         const langBtn = document.getElementById('btnLangSwitch');
         if (langBtn) {
             langBtn.textContent = t('lang.switch');
+        }
+
+        if (window.Theme && typeof window.Theme.updateToggleButton === 'function') {
+            window.Theme.updateToggleButton();
         }
     }
 
