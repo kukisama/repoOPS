@@ -71,6 +71,8 @@ const I18n = (() => {
             'editor.confirmDeleteTask': 'Are you sure you want to delete this task?',
             'editor.validationGroupName': 'Group name cannot be empty.',
             'editor.validationTaskFields': 'Task ID, Name, and Script Path are required.',
+            'editor.context.copy': '📋 Copy task',
+            'editor.context.delete': '🗑️ Delete task',
 
             // Alerts
             'alert.notConnected': 'Not connected to server. Please wait for reconnection.',
@@ -148,6 +150,8 @@ const I18n = (() => {
             'editor.confirmDeleteTask': '确定要删除此任务吗？',
             'editor.validationGroupName': '分组名称不能为空。',
             'editor.validationTaskFields': '任务ID、任务名称和脚本路径为必填项。',
+            'editor.context.copy': '📋 复制任务',
+            'editor.context.delete': '🗑️ 删除任务',
 
             // Alerts
             'alert.notConnected': '未连接到服务器，请等待重新连接。',

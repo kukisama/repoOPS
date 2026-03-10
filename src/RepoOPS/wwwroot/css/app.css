@@ -987,6 +987,8 @@ body {
     border-radius: 4px;
     padding: 12px;
     scroll-margin-top: 90px;
+    cursor: grab;
+    transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
 }
 
 .editor-task.editor-task-target {
@@ -994,10 +996,29 @@ body {
     box-shadow: 0 0 0 2px rgba(10, 102, 212, 0.2);
 }
 
+.editor-task.context-target {
+    border-color: var(--accent-color);
+    background: var(--bg-active);
+}
+
+.editor-task.dragging {
+    opacity: 0.65;
+    cursor: grabbing;
+    border-style: dashed;
+}
+
 .editor-task-list {
     display: flex;
     flex-direction: column;
     gap: 24px;
+    min-height: 44px;
+    border-radius: 6px;
+    transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.editor-task-list.drag-over {
+    background: var(--surface-hover);
+    box-shadow: inset 0 0 0 1px var(--accent-color);
 }
 
 .editor-task-header {
@@ -1083,6 +1104,42 @@ body {
 .editor-btn-delete:hover {
     opacity: 1;
     background: rgba(241, 76, 76, 0.15);
+}
+
+.editor-task-context-menu {
+    position: fixed;
+    min-width: 140px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 10px 24px var(--shadow-color);
+    padding: 6px;
+    z-index: 1400;
+}
+
+.editor-task-context-menu[hidden] {
+    display: none;
+}
+
+.editor-task-context-menu-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.editor-task-context-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+.editor-task-context-menu-item.danger:hover {
+    background: rgba(241, 76, 76, 0.2);
+    color: var(--error-color);
 }
 
 .editor-footer {

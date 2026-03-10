@@ -5,6 +5,8 @@ const ConfigEditor = (() => {
     let isOpen = false;
     let pendingFocusTaskId = null;
     let currentIconInput = null;
+    let contextTaskElement = null;
+    let draggedTaskElement = null;
     const recentIconsStorageKey = 'repoops-recent-icons';
 
     const iconCategories = [
@@ -40,6 +42,8 @@ const ConfigEditor = (() => {
         isOpen = false;
         pendingFocusTaskId = null;
         currentIconInput = null;
+        contextTaskElement = null;
+        draggedTaskElement = null;
         const overlay = document.getElementById('editorOverlay');
         if (overlay) overlay.remove();
     }
@@ -110,6 +114,7 @@ const ConfigEditor = (() => {
                 <div class="editor-body-content">
                 ${buildIconDatalistHTML()}
                 ${buildIconPickerHTML()}
+                ${buildTaskContextMenuHTML()}
                 <!-- Global Settings -->
                 <div class="editor-section">
                     <h3 data-i18n="editor.global">${t('editor.global')}</h3>
@@ -163,6 +168,16 @@ const ConfigEditor = (() => {
             <div class="editor-icon-picker-body" id="editorIconPickerBody">
                 ${buildIconPickerSections('')}
             </div>
+        </div>`;
+    }
+
+    function buildTaskContextMenuHTML() {
+        const t = I18n.t;
+
+        return `
+        <div class="editor-task-context-menu" id="editorTaskContextMenu" hidden>
+            <button class="editor-task-context-menu-item" type="button" data-action="copy" data-i18n="editor.context.copy">${t('editor.context.copy')}</button>
+            <button class="editor-task-context-menu-item danger" type="button" data-action="delete" data-i18n="editor.context.delete">${t('editor.context.delete')}</button>
         </div>`;
     }
 
@@ -261,7 +276,7 @@ const ConfigEditor = (() => {
     function buildTaskHTML(task, gi, ti) {
         const t = I18n.t;
         return `
-        <div class="editor-task" data-group-index="${gi}" data-task-index="${ti}" data-task-id="${escapeAttr(task.id || '')}">
+        <div class="editor-task" draggable="true" data-group-index="${gi}" data-task-index="${ti}" data-task-id="${escapeAttr(task.id || '')}">
             <input type="hidden" class="task-description" value="${escapeAttr(task.description || '')}">
             <input type="hidden" class="task-workingDirectory" value="${escapeAttr(task.workingDirectory || '')}">
             <div class="editor-task-header">
@@ -339,35 +354,17 @@ const ConfigEditor = (() => {
                 if (confirm(I18n.t('editor.confirmDeleteGroup'))) {
                     const groupEl = this.closest('.editor-group');
                     groupEl.remove();
+                    reindexTaskMeta();
                 }
             };
         });
 
-        container.querySelectorAll('.delete-task-btn').forEach(btn => {
-            btn.onclick = function () {
-                if (confirm(I18n.t('editor.confirmDeleteTask'))) {
-                    const taskEl = this.closest('.editor-task');
-                    taskEl.remove();
-                }
-            };
+        container.querySelectorAll('.editor-task').forEach(taskEl => {
+            attachTaskEvents(taskEl);
         });
 
-        container.querySelectorAll('.clone-task-btn').forEach(btn => {
-            btn.onclick = function () {
-                const taskEl = this.closest('.editor-task');
-                const task = readTaskFromDOM(taskEl);
-                task.id = task.id ? task.id + '-copy' : '';
-                task.name = task.name ? task.name + ' (副本)' : '';
-                const gi = taskEl.closest('.editor-group').getAttribute('data-group-index');
-                const ti = taskEl.closest('.editor-task-list').querySelectorAll('.editor-task').length;
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = buildTaskHTML(task, gi, ti);
-                const cloned = tempDiv.firstElementChild;
-                taskEl.after(cloned);
-                attachTaskEvents(cloned);
-                I18n.applyTranslations();
-            };
-        });
+        attachTaskDragDropEvents(container);
+        attachTaskContextMenuEvents(container);
 
         container.querySelectorAll('.add-task-btn').forEach(btn => {
             btn.onclick = function () {
@@ -382,7 +379,9 @@ const ConfigEditor = (() => {
                 taskList.appendChild(newTask);
                 attachTaskEvents(newTask);
                 attachIconPickerEvents(newTask);
+                attachTaskDragDropEvents(groupEl);
                 I18n.applyTranslations();
+                reindexTaskMeta();
             };
         });
     }
@@ -446,24 +445,37 @@ const ConfigEditor = (() => {
 
     function attachTaskEvents(taskEl) {
         taskEl.querySelector('.delete-task-btn').onclick = function () {
-            if (confirm(I18n.t('editor.confirmDeleteTask'))) {
-                taskEl.remove();
-            }
+            deleteTaskElement(taskEl);
         };
+
         taskEl.querySelector('.clone-task-btn').onclick = function () {
-            const task = readTaskFromDOM(taskEl);
-            task.id = task.id ? task.id + '-copy' : '';
-            task.name = task.name ? task.name + ' (副本)' : '';
-            const gi = taskEl.closest('.editor-group').getAttribute('data-group-index');
-            const ti = taskEl.closest('.editor-task-list').querySelectorAll('.editor-task').length;
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = buildTaskHTML(task, gi, ti);
-            const cloned = tempDiv.firstElementChild;
-            taskEl.after(cloned);
-            attachTaskEvents(cloned);
-            attachIconPickerEvents(cloned);
-            I18n.applyTranslations();
+            cloneTaskElement(taskEl);
         };
+
+        taskEl.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showEditorTaskContextMenu(event.clientX, event.clientY, taskEl);
+        });
+
+        taskEl.addEventListener('dragstart', (event) => {
+            draggedTaskElement = taskEl;
+            taskEl.classList.add('dragging');
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', taskEl.getAttribute('data-task-id') || 'drag-task');
+            }
+            hideEditorTaskContextMenu();
+        });
+
+        taskEl.addEventListener('dragend', () => {
+            taskEl.classList.remove('dragging');
+            draggedTaskElement = null;
+            document.querySelectorAll('.editor-task-list.drag-over').forEach(list => {
+                list.classList.remove('drag-over');
+            });
+            reindexTaskMeta();
+        });
     }
 
     function addGroup() {
@@ -478,6 +490,188 @@ const ConfigEditor = (() => {
         attachGroupEvents(newGroup);
         attachIconPickerEvents(newGroup);
         I18n.applyTranslations();
+        reindexTaskMeta();
+    }
+
+    function attachTaskDragDropEvents(container) {
+        container.querySelectorAll('.editor-task-list').forEach(taskList => {
+            if (taskList.dataset.dragBound === 'true') {
+                return;
+            }
+
+            taskList.dataset.dragBound = 'true';
+
+            taskList.addEventListener('dragover', (event) => {
+                if (!draggedTaskElement) {
+                    return;
+                }
+
+                event.preventDefault();
+                taskList.classList.add('drag-over');
+
+                const afterElement = getTaskElementAfterPointer(taskList, event.clientY);
+                if (!afterElement) {
+                    taskList.appendChild(draggedTaskElement);
+                } else if (afterElement !== draggedTaskElement) {
+                    taskList.insertBefore(draggedTaskElement, afterElement);
+                }
+            });
+
+            taskList.addEventListener('drop', (event) => {
+                if (!draggedTaskElement) {
+                    return;
+                }
+
+                event.preventDefault();
+                taskList.classList.remove('drag-over');
+                reindexTaskMeta();
+            });
+
+            taskList.addEventListener('dragleave', (event) => {
+                if (!taskList.contains(event.relatedTarget)) {
+                    taskList.classList.remove('drag-over');
+                }
+            });
+        });
+    }
+
+    function getTaskElementAfterPointer(taskList, pointerY) {
+        const taskElements = Array.from(taskList.querySelectorAll('.editor-task:not(.dragging)'));
+
+        let closest = {
+            offset: Number.NEGATIVE_INFINITY,
+            element: null
+        };
+
+        taskElements.forEach(taskElement => {
+            const box = taskElement.getBoundingClientRect();
+            const offset = pointerY - box.top - box.height / 2;
+
+            if (offset < 0 && offset > closest.offset) {
+                closest = { offset, element: taskElement };
+            }
+        });
+
+        return closest.element;
+    }
+
+    function attachTaskContextMenuEvents(container) {
+        const menu = container.querySelector('#editorTaskContextMenu');
+        if (!menu || menu.dataset.bound === 'true') {
+            return;
+        }
+
+        menu.dataset.bound = 'true';
+        menu.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-action]');
+            if (!button || !contextTaskElement) {
+                return;
+            }
+
+            const action = button.getAttribute('data-action');
+            const targetTask = contextTaskElement;
+            hideEditorTaskContextMenu();
+
+            if (action === 'copy') {
+                cloneTaskElement(targetTask);
+            } else if (action === 'delete') {
+                deleteTaskElement(targetTask);
+            }
+        });
+
+        container.addEventListener('click', (event) => {
+            if (!event.target.closest('#editorTaskContextMenu')) {
+                hideEditorTaskContextMenu();
+            }
+        });
+
+        container.addEventListener('contextmenu', (event) => {
+            if (!event.target.closest('.editor-task')) {
+                hideEditorTaskContextMenu();
+            }
+        });
+
+        container.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                hideEditorTaskContextMenu();
+            }
+        });
+    }
+
+    function showEditorTaskContextMenu(x, y, taskEl) {
+        const menu = document.getElementById('editorTaskContextMenu');
+        if (!menu) {
+            return;
+        }
+
+        hideEditorTaskContextMenu();
+
+        contextTaskElement = taskEl;
+        taskEl.classList.add('context-target');
+
+        menu.hidden = false;
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+
+        const rect = menu.getBoundingClientRect();
+        const maxLeft = window.innerWidth - rect.width - 8;
+        const maxTop = window.innerHeight - rect.height - 8;
+        menu.style.left = `${Math.max(8, Math.min(x, maxLeft))}px`;
+        menu.style.top = `${Math.max(8, Math.min(y, maxTop))}px`;
+    }
+
+    function hideEditorTaskContextMenu() {
+        const menu = document.getElementById('editorTaskContextMenu');
+        if (menu) {
+            menu.hidden = true;
+        }
+
+        document.querySelectorAll('.editor-task.context-target').forEach(el => {
+            el.classList.remove('context-target');
+        });
+
+        contextTaskElement = null;
+    }
+
+    function cloneTaskElement(taskEl) {
+        const task = readTaskFromDOM(taskEl);
+        task.id = task.id ? `${task.id}-copy` : '';
+        task.name = task.name ? `${task.name} (副本)` : '';
+
+        const taskList = taskEl.closest('.editor-task-list');
+        const groupEl = taskEl.closest('.editor-group');
+        const gi = groupEl?.getAttribute('data-group-index') || '0';
+        const ti = taskList ? taskList.querySelectorAll('.editor-task').length : 0;
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = buildTaskHTML(task, gi, ti);
+
+        const cloned = tempDiv.firstElementChild;
+        taskEl.after(cloned);
+        attachTaskEvents(cloned);
+        attachIconPickerEvents(cloned);
+        attachTaskDragDropEvents(groupEl || document);
+        I18n.applyTranslations();
+        reindexTaskMeta();
+    }
+
+    function deleteTaskElement(taskEl) {
+        if (!confirm(I18n.t('editor.confirmDeleteTask'))) {
+            return;
+        }
+
+        hideEditorTaskContextMenu();
+        taskEl.remove();
+        reindexTaskMeta();
+    }
+
+    function reindexTaskMeta() {
+        document.querySelectorAll('#editorGroups .editor-group').forEach((groupEl, gi) => {
+            groupEl.setAttribute('data-group-index', String(gi));
+            groupEl.querySelectorAll('.editor-task').forEach((taskEl, ti) => {
+                taskEl.setAttribute('data-group-index', String(gi));
+                taskEl.setAttribute('data-task-index', String(ti));
+            });
+        });
     }
 
     function collectConfig() {
