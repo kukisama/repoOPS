@@ -96,8 +96,15 @@ public static class RepoOpsWebApp
                 return Results.BadRequest(new { error = "Invalid settings" });
             }
 
-            var saved = supervisorService.SaveSettings(settings);
-            return Results.Ok(saved);
+            try
+            {
+                var saved = supervisorService.SaveSettings(settings);
+                return Results.Ok(saved);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
         });
 
         app.MapGet("/api/agent/runs", (AgentSupervisorService supervisorService) => Results.Ok(supervisorService.GetRuns()));

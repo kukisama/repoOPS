@@ -353,14 +353,25 @@ public sealed class AgentSupervisorService(
             var stdoutTask = PumpStreamAsync(runId, workerId, process.StandardOutput, handle.OutputBuffer, false, bufferMaxChars);
             var stderrTask = PumpStreamAsync(runId, workerId, process.StandardError, handle.OutputBuffer, true, bufferMaxChars);
 
-            var processTask = Task.WhenAll(stdoutTask, stderrTask).ContinueWith(_ => process.WaitForExitAsync()).Unwrap();
             var timeoutMinutes = settings.WorkerTimeoutMinutes > 0 ? settings.WorkerTimeoutMinutes : 30;
-            var completed = await Task.WhenAny(processTask, Task.Delay(TimeSpan.FromMinutes(timeoutMinutes)));
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMinutes));
+            var timedOut = false;
 
-            if (completed != processTask && !process.HasExited)
+            try
+            {
+                await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(timeoutCts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                timedOut = true;
+            }
+
+            if (timedOut && !process.HasExited)
             {
                 _logger.LogWarning("Worker {WorkerId} timed out after {Minutes} minutes, killing process.", workerId, timeoutMinutes);
-                try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception killEx) { _logger.LogWarning(killEx, "Failed to kill timed-out worker {WorkerId}.", workerId); }
                 await process.WaitForExitAsync();
             }
 
@@ -1124,9 +1135,17 @@ public sealed class AgentSupervisorService(
             return [];
         }
 
-        return values
-            .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key))
-            .ToDictionary(kvp => kvp.Key.Trim(), kvp => kvp.Value ?? string.Empty);
+        var result = new Dictionary<string, string>();
+        foreach (var kvp in values)
+        {
+            var key = kvp.Key?.Trim();
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                result[key] = kvp.Value ?? string.Empty;
+            }
+        }
+
+        return result;
     }
 
     private static string BuildCommandPreview(ProcessStartInfo startInfo)
