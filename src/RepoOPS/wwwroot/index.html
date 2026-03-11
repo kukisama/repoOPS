@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RepoOPS - Script Task Runner</title>
+    <title>数学小练习 - 小学作业</title>
     <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="lib/xterm.min.css">
 </head>
 <body>
     <div class="app-container">
-        <!-- Header -->
         <header class="app-header">
             <div class="header-left">
-                <h1>⚡ RepoOPS</h1>
-                <span class="header-subtitle" data-i18n="app.subtitle">Script Task Runner</span>
+                <h1>🧮 数学小练习</h1>
+                <span class="header-subtitle" data-i18n="app.subtitle">Elementary Math Trainer</span>
             </div>
             <div class="header-right">
                 <button id="btnThemeSwitch" class="btn-theme" onclick="Theme.toggleTheme()" title="切换主题">☀️ 明亮</button>
@@ -22,76 +21,149 @@
             </div>
         </header>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Left Panel: Task List -->
-            <aside class="task-panel" id="taskPanel">
-                <div class="panel-header">
-                    <h2 data-i18n="panel.tasks">📋 Tasks</h2>
-                    <div class="panel-header-actions">
-                        <button class="btn-icon" onclick="ConfigEditor.open()" data-i18n-title="btn.settings" title="Edit task configuration">⚙️</button>
-                        <button class="btn-icon" onclick="refreshConfig()" data-i18n-title="btn.refresh" title="Refresh task list">🔄</button>
-                    </div>
-                </div>
-                <div class="task-list" id="taskList">
-                    <div class="loading" data-i18n="loading.tasks">Loading tasks...</div>
-                </div>
-                <div class="task-context-menu" id="taskContextMenu" hidden>
-                    <button class="task-context-menu-item" type="button" id="btnTaskEdit" onclick="editTaskFromContextMenu()" data-i18n="menu.editTask">✏️ 编辑</button>
-                    <button class="task-context-menu-item" type="button" id="btnTaskCopy" onclick="copyTaskFromContextMenu()" data-i18n="menu.copyTask">📋 复制</button>
-                    <button class="task-context-menu-item task-context-menu-item-danger" type="button" id="btnTaskDelete" onclick="deleteTaskFromContextMenu()" data-i18n="menu.deleteTask">🗑️ 删除</button>
-                </div>
-                <div class="panel-footer">
-                    <div class="running-tasks" id="runningTasksInfo">
-                        <span><span data-i18n="running.label">Running:</span> <strong id="runningCount">0</strong></span>
-                    </div>
-                </div>
-            </aside>
+        <nav class="workspace-nav" id="workspaceNav">
+            <button class="workspace-tab active" data-view="tasks">🧮 练习</button>
+            <button class="workspace-tab" data-view="runs">🧠 Runs</button>
+            <button class="workspace-tab" data-view="roles">🎭 Roles</button>
+        </nav>
 
-            <!-- Resize handle -->
-            <div class="resize-handle" id="resizeHandle"></div>
+        <section class="workspace-view active" id="view-tasks">
+            <div class="main-content">
+                <aside class="task-panel" id="taskPanel">
+                    <div class="panel-header">
+                        <h2 data-i18n="panel.tasks">📋 Tasks</h2>
+                        <div class="panel-header-actions">
+                            <button class="btn-icon" onclick="ConfigEditor.open()" data-i18n-title="btn.settings" title="Edit task configuration">⚙️</button>
+                            <button class="btn-icon" onclick="refreshConfig()" data-i18n-title="btn.refresh" title="Refresh task list">🔄</button>
+                        </div>
+                    </div>
+                    <div class="task-list" id="taskList">
+                        <div class="loading" data-i18n="loading.tasks">Loading tasks...</div>
+                    </div>
+                    <div class="task-context-menu" id="taskContextMenu" hidden>
+                        <button class="task-context-menu-item" type="button" id="btnTaskEdit" onclick="editTaskFromContextMenu()" data-i18n="menu.editTask">✏️ 编辑</button>
+                        <button class="task-context-menu-item" type="button" id="btnTaskCopy" onclick="copyTaskFromContextMenu()" data-i18n="menu.copyTask">📋 复制</button>
+                        <button class="task-context-menu-item task-context-menu-item-danger" type="button" id="btnTaskDelete" onclick="deleteTaskFromContextMenu()" data-i18n="menu.deleteTask">🗑️ 删除</button>
+                    </div>
+                    <div class="panel-footer">
+                        <div class="running-tasks" id="runningTasksInfo">
+                            <span><span data-i18n="running.label">Running:</span> <strong id="runningCount">0</strong></span>
+                        </div>
+                    </div>
+                </aside>
 
-            <!-- Right Panel: Terminal Output -->
-            <main class="output-panel">
-                <div class="panel-header">
-                    <h2 data-i18n="panel.output">📺 Output</h2>
-                    <div class="tab-bar" id="tabBar">
-                        <div class="tab-placeholder" data-i18n="tab.placeholder">Select a task to run</div>
+                <div class="resize-handle" id="resizeHandle"></div>
+
+                <main class="output-panel">
+                    <div class="panel-header">
+                        <h2 data-i18n="panel.output">📺 Output</h2>
+                        <div class="tab-bar" id="tabBar">
+                            <div class="tab-placeholder" data-i18n="tab.placeholder">Select a task to run</div>
+                        </div>
+                        <div class="output-actions">
+                            <button class="btn-icon" onclick="clearCurrentTerminal()" data-i18n-title="btn.clear" title="Clear output">🗑️</button>
+                            <button class="btn-icon btn-danger" onclick="closeAllTabs()" data-i18n-title="btn.closeAll" title="Close all tasks" id="btnCloseAllTabs" disabled>❎</button>
+                            <button class="btn-icon btn-danger" onclick="stopCurrentTask()" data-i18n-title="btn.stop" title="Stop current task" id="btnStop" disabled>⏹️</button>
+                        </div>
                     </div>
-                    <div class="output-actions">
-                        <button class="btn-icon" onclick="clearCurrentTerminal()" data-i18n-title="btn.clear" title="Clear output">🗑️</button>
-                        <button class="btn-icon btn-danger" onclick="closeAllTabs()" data-i18n-title="btn.closeAll" title="Close all tasks" id="btnCloseAllTabs" disabled>❎</button>
-                        <button class="btn-icon btn-danger" onclick="stopCurrentTask()" data-i18n-title="btn.stop" title="Stop current task" id="btnStop" disabled>⏹️</button>
-                    </div>
-                </div>
-                <div class="terminal-container" id="terminalContainer">
-                    <div class="welcome-screen" id="welcomeScreen">
-                        <div class="welcome-content">
-                            <h2 data-i18n="welcome.title">Welcome to RepoOPS</h2>
-                            <p data-i18n="welcome.desc1">Select a task from the left panel to start execution.</p>
-                            <p data-i18n="welcome.desc2">Output will appear here in real-time.</p>
-                            <div class="welcome-tips">
-                                <h3 data-i18n="welcome.tips">Tips:</h3>
-                                <ul>
-                                    <li data-i18n="welcome.tip1">Click any task to start it</li>
-                                    <li data-i18n="welcome.tip2">Multiple tasks can run simultaneously</li>
-                                    <li data-i18n="welcome.tip3">Click the ⏹️ button or tab close to stop a running task</li>
-                                    <li data-i18n="welcome.tip4">Click ⚙️ in the task panel to configure your tasks</li>
-                                </ul>
+                    <div class="terminal-container" id="terminalContainer">
+                        <div class="welcome-screen" id="welcomeScreen">
+                            <div class="welcome-content">
+                                 <h2 data-i18n="welcome.title">Welcome to Elementary Math</h2>
+                                 <p data-i18n="welcome.desc1">Select a lesson or homework item from the left panel.</p>
+                                 <p data-i18n="welcome.desc2">Guidance and answers will appear here in real-time.</p>
+                                <div class="welcome-tips">
+                                    <h3 data-i18n="welcome.tips">Tips:</h3>
+                                    <ul>
+                                        <li data-i18n="welcome.tip1">Click any task to start it</li>
+                                        <li data-i18n="welcome.tip2">Multiple tasks can run simultaneously</li>
+                                        <li data-i18n="welcome.tip3">Click the ⏹️ button or tab close to stop a running task</li>
+                                        <li data-i18n="welcome.tip4">Click ⚙️ in the task panel to configure your tasks</li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </main>
-        </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-runs">
+            <div class="main-content workspace-main-content">
+                <aside class="task-panel workspace-sidebar">
+                    <div class="panel-header">
+                        <h2>🧠 Runs</h2>
+                    </div>
+                    <div class="workspace-sidebar-body">
+                        <div class="agent-form-card">
+                            <div class="agent-form-title">新建 Run</div>
+                            <label class="agent-label" for="runTitleInput">标题</label>
+                            <input id="runTitleInput" class="agent-input" type="text" placeholder="例如：RepoOPS agent supervisor MVP">
+                            <label class="agent-label" for="runGoalInput">总目标</label>
+                            <textarea id="runGoalInput" class="agent-textarea" placeholder="描述这轮多角色协作要完成的事情"></textarea>
+                            <label class="agent-label" for="runWorkspaceRootInput">项目起始目录</label>
+                            <input id="runWorkspaceRootInput" class="agent-input" type="text" placeholder="默认 . （相对仓库根目录）；例如 src\RepoOPS 或 .">
+                            <div class="agent-helper-text">这是本轮 Run 的起点目录。各角色里的“工作路径”会基于这里继续细分。</div>
+                            <label class="agent-checkbox-row">
+                                <input id="runAutopilotInput" type="checkbox" checked>
+                                <span>创建后自动推进</span>
+                            </label>
+                            <label class="agent-label" for="runMaxAutoStepsInput">最大自动推进轮次</label>
+                            <input id="runMaxAutoStepsInput" class="agent-input" type="number" min="1" max="20" value="6">
+                            <div class="agent-label">角色</div>
+                            <div id="runRoleOptions" class="agent-checklist"></div>
+                            <button id="btnCreateRun" class="editor-btn-primary agent-primary-btn" type="button">创建并启动</button>
+                        </div>
+
+                        <div class="agent-list-section">
+                            <div class="agent-form-title">最近 Runs</div>
+                            <div id="runsList" class="agent-list"></div>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="output-panel workspace-detail-panel">
+                    <div class="panel-header">
+                        <h2>📡 Run Detail</h2>
+                    </div>
+                    <div id="runDetail" class="workspace-scroll-panel">
+                        <div class="workspace-empty-state">选择左侧 Run，或者先创建一个新的协作任务。</div>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-roles">
+            <div class="main-content workspace-main-content">
+                <aside class="task-panel workspace-sidebar">
+                    <div class="panel-header">
+                        <h2>🎭 Roles</h2>
+                        <div class="panel-header-actions">
+                            <button id="btnAddRole" class="btn-icon" type="button" title="添加角色">➕</button>
+                            <button id="btnSaveRoles" class="btn-icon" type="button" title="保存角色">💾</button>
+                        </div>
+                    </div>
+                    <div id="rolesList" class="workspace-sidebar-body agent-list"></div>
+                </aside>
+
+                <main class="output-panel workspace-detail-panel">
+                    <div class="panel-header">
+                        <h2>📝 Role Editor</h2>
+                    </div>
+                    <div id="roleEditor" class="workspace-scroll-panel">
+                        <div class="workspace-empty-state">选择一个角色开始编辑。</div>
+                    </div>
+                </main>
+            </div>
+        </section>
     </div>
 
-    <!-- Scripts -->
     <script src="lib/xterm.min.js"></script>
     <script src="lib/xterm-addon-fit.min.js"></script>
     <script src="lib/signalr.min.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/config-editor.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/agent-console.js"></script>
 </body>
 </html>

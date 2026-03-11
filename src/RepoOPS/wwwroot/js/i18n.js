@@ -4,15 +4,15 @@ const I18n = (() => {
     const translations = {
         'en': {
             // Header
-            'app.title': 'RepoOPS',
-            'app.subtitle': 'Script Task Runner',
+            'app.title': 'Elementary Math',
+            'app.subtitle': '1+1 and 1+2 Beginner Trainer',
             'status.connected': '● Connected',
             'status.disconnected': '● Disconnected',
 
             // Task Panel
-            'panel.tasks': '📋 Tasks',
-            'panel.output': '📺 Output',
-            'btn.refresh': 'Refresh task list',
+            'panel.tasks': '📘 Lessons',
+            'panel.output': '📺 Guidance',
+            'btn.refresh': 'Refresh lesson list',
             'btn.clear': 'Clear output',
             'btn.closeAll': 'Close all tasks',
             'btn.stop': 'Stop current task',
@@ -23,20 +23,20 @@ const I18n = (() => {
             'menu.deleteTask': '🗑️ Delete',
             'menu.confirmDeleteTask': 'Are you sure you want to delete this task?',
             'menu.saveConfigFailed': 'Failed to save task list changes.',
-            'loading.tasks': 'Loading tasks...',
-            'loading.failed': 'Failed to load tasks. Check tasks.json configuration.',
-            'no.tasks': 'No tasks configured. Click ⚙️ to add tasks.',
-            'tab.placeholder': 'Select a task to run',
+            'loading.tasks': 'Loading lessons...',
+            'loading.failed': 'Failed to load lessons. Check tasks.json configuration.',
+            'no.tasks': 'No lessons configured. Click ⚙️ to add items.',
+            'tab.placeholder': 'Select a lesson or homework item',
 
             // Welcome Screen
-            'welcome.title': 'Welcome to RepoOPS',
-            'welcome.desc1': 'Select a task from the left panel to start execution.',
-            'welcome.desc2': 'Output will appear here in real-time.',
+            'welcome.title': 'Welcome to Elementary Math',
+            'welcome.desc1': 'Select a lesson or homework item from the left panel to begin.',
+            'welcome.desc2': 'Explanations and reference answers will appear here in real-time.',
             'welcome.tips': 'Tips:',
-            'welcome.tip1': 'Click any task to start it',
-            'welcome.tip2': 'Multiple tasks can run simultaneously',
-            'welcome.tip3': 'Click the ⏹️ button or tab close to stop a running task',
-            'welcome.tip4': 'Click ⚙️ in the task panel to configure your tasks',
+            'welcome.tip1': 'Click a lesson to open the explanation',
+            'welcome.tip2': 'Use practice items for repeated review',
+            'welcome.tip3': 'Open the homework task for after-class exercises',
+            'welcome.tip4': 'Click ⚙️ to edit lesson configuration if needed',
 
             // Config Editor
             'editor.title': '⚙️ Task Configuration',
@@ -106,15 +106,15 @@ const I18n = (() => {
         },
         'zh': {
             // Header
-            'app.title': 'RepoOPS',
-            'app.subtitle': '脚本任务运行器',
+            'app.title': '数学小练习',
+            'app.subtitle': '1+1 和 1+2 初级训练',
             'status.connected': '● 已连接',
             'status.disconnected': '● 未连接',
 
             // Task Panel
-            'panel.tasks': '📋 任务',
-            'panel.output': '📺 输出',
-            'btn.refresh': '刷新任务列表',
+            'panel.tasks': '📘 练习',
+            'panel.output': '📺 讲解',
+            'btn.refresh': '刷新练习列表',
             'btn.clear': '清除输出',
             'btn.closeAll': '关闭所有任务窗口',
             'btn.stop': '停止当前任务',
@@ -125,20 +125,20 @@ const I18n = (() => {
             'menu.deleteTask': '🗑️ 删除',
             'menu.confirmDeleteTask': '确定要删除此任务吗？',
             'menu.saveConfigFailed': '保存任务列表修改失败。',
-            'loading.tasks': '正在加载任务...',
-            'loading.failed': '加载任务失败，请检查 tasks.json 配置。',
-            'no.tasks': '暂无任务配置，点击 ⚙️ 添加任务。',
-            'tab.placeholder': '选择一个任务来运行',
+            'loading.tasks': '正在加载练习...',
+            'loading.failed': '加载练习失败，请检查 tasks.json 配置。',
+            'no.tasks': '暂无练习配置，点击 ⚙️ 添加内容。',
+            'tab.placeholder': '选择一个讲解或作业项目',
 
             // Welcome Screen
-            'welcome.title': '欢迎使用 RepoOPS',
-            'welcome.desc1': '从左侧面板选择一个任务开始执行。',
-            'welcome.desc2': '输出将在此处实时显示。',
+            'welcome.title': '欢迎来到数学小练习',
+            'welcome.desc1': '从左侧面板选择 1+1、1+2 讲解或课后作业。',
+            'welcome.desc2': '讲解内容和参考答案会实时显示在这里。',
             'welcome.tips': '提示：',
-            'welcome.tip1': '点击任意任务即可启动',
-            'welcome.tip2': '支持多个任务同时运行',
-            'welcome.tip3': '点击 ⏹️ 按钮或关闭标签页可停止运行中的任务',
-            'welcome.tip4': '点击任务面板中的 ⚙️ 配置你的任务',
+            'welcome.tip1': '点击任意练习即可开始学习',
+            'welcome.tip2': '先看讲解，再做练习效果更好',
+            'welcome.tip3': '课后作业可以重复打开用于复习',
+            'welcome.tip4': '点击练习面板中的 ⚙️ 可以调整内容',
 
             // Config Editor
             'editor.title': '⚙️ 任务配置',
