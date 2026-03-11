@@ -79,6 +79,17 @@ public sealed class AgentRoleConfigService(ILogger<AgentRoleConfigService> logge
     {
         return new AgentRoleCatalog
         {
+            Settings = new SupervisorSettings
+            {
+                SupervisorModel = "gpt-5.4",
+                DefaultModel = "gpt-5.4",
+                DefaultMaxAutoSteps = 6,
+                DefaultAutoPilotEnabled = true,
+                MaxConcurrentWorkers = 4,
+                WorkerTimeoutMinutes = 30,
+                OutputBufferMaxChars = 12000,
+                DecisionHistoryLimit = 40
+            },
             Roles =
             [
                 new AgentRoleDefinition
