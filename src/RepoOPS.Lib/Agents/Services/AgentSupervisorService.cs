@@ -33,6 +33,15 @@ public sealed class AgentSupervisorService(
         return _roleConfigService.Load();
     }
 
+    public SupervisorSettings SaveSettings(SupervisorSettings settings)
+    {
+        var catalog = _roleConfigService.Load();
+        catalog.Settings = settings;
+        var normalized = NormalizeAndValidateRoleCatalog(catalog);
+        _roleConfigService.Save(normalized);
+        return _roleConfigService.Load().Settings ?? new SupervisorSettings();
+    }
+
     public IReadOnlyList<SupervisorRun> GetRuns() => _runStore.GetAll();
 
     public SupervisorRun? GetRun(string runId) => _runStore.Get(runId);
@@ -40,16 +49,19 @@ public sealed class AgentSupervisorService(
     public async Task<SupervisorRun> CreateRunAsync(CreateSupervisorRunRequest request)
     {
         var roleCatalog = _roleConfigService.Load();
+        var settings = roleCatalog.Settings ?? new SupervisorSettings();
         var roles = roleCatalog.Roles
             .Where(role => request.RoleIds.Contains(role.RoleId, StringComparer.OrdinalIgnoreCase))
             .ToList();
-        var repositoryRoot = FindWorkspaceRoot();
+        var repositoryRoot = FindWorkspaceRoot(settings);
         var runWorkspaceRoot = ResolveRunWorkspaceRoot(repositoryRoot, request.WorkspaceRoot);
 
         if (roles.Count == 0)
         {
             throw new InvalidOperationException("At least one role must be selected.");
         }
+
+        var effectiveMaxAutoSteps = request.MaxAutoSteps > 0 ? request.MaxAutoSteps : settings.DefaultMaxAutoSteps;
 
         var run = new SupervisorRun
         {
@@ -59,7 +71,7 @@ public sealed class AgentSupervisorService(
             Status = request.AutoStart ? "running" : "draft",
             WorkspaceRoot = runWorkspaceRoot,
             AutoPilotEnabled = request.AutoPilotEnabled,
-            MaxAutoSteps = Math.Max(1, request.MaxAutoSteps),
+            MaxAutoSteps = Math.Max(1, effectiveMaxAutoSteps),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             Workers = roles.Select(role => new AgentWorkerSession
@@ -113,13 +125,21 @@ public sealed class AgentSupervisorService(
             throw new InvalidOperationException($"Worker '{worker.RoleName}' is already running.");
         }
 
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
+
+        if (settings.MaxConcurrentWorkers > 0 && _activeProcesses.Count >= settings.MaxConcurrentWorkers)
+        {
+            throw new InvalidOperationException($"Maximum concurrent workers limit ({settings.MaxConcurrentWorkers}) reached. Stop a running worker first.");
+        }
+
         var role = RequireRole(worker.RoleId);
         var effectivePrompt = string.IsNullOrWhiteSpace(prompt)
             ? BuildInitialPrompt(run, worker, role)
             : prompt.Trim();
-        var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot) ? FindWorkspaceRoot() : run.WorkspaceRoot!;
+        var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot) ? FindWorkspaceRoot(settings) : run.WorkspaceRoot!;
         var workspacePath = ResolveWorkspacePath(workspaceRoot, role.WorkspacePath);
-        var launchPlan = BuildWorkerLaunchPlan(run, worker, role, effectivePrompt, workspacePath);
+        var launchPlan = BuildWorkerLaunchPlan(run, worker, role, effectivePrompt, workspacePath, settings);
 
         worker.Status = "running";
         worker.WorkspacePath = workspacePath;
@@ -209,7 +229,11 @@ public sealed class AgentSupervisorService(
         PersistRun(run);
         await BroadcastRunUpdatedAsync(run);
 
-        var verification = await _verificationService.ExecuteAsync(command, run.WorkspaceRoot);
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
+        var effectiveCommand = string.IsNullOrWhiteSpace(command) ? settings.DefaultVerificationCommand : command;
+
+        var verification = await _verificationService.ExecuteAsync(effectiveCommand, run.WorkspaceRoot);
         run = RequireRun(runId);
         run.LastVerification = verification;
         run.Status = verification.Passed ? "review" : "needs-attention";
@@ -318,15 +342,38 @@ public sealed class AgentSupervisorService(
     {
         var run = RequireRun(runId);
         var worker = RequireWorker(run, workerId);
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
+        var bufferMaxChars = Math.Max(1000, settings.OutputBufferMaxChars);
+        var decisionLimit = Math.Max(10, settings.DecisionHistoryLimit);
 
         try
         {
             process.Start();
-            var stdoutTask = PumpStreamAsync(runId, workerId, process.StandardOutput, handle.OutputBuffer, false);
-            var stderrTask = PumpStreamAsync(runId, workerId, process.StandardError, handle.OutputBuffer, true);
+            var stdoutTask = PumpStreamAsync(runId, workerId, process.StandardOutput, handle.OutputBuffer, false, bufferMaxChars);
+            var stderrTask = PumpStreamAsync(runId, workerId, process.StandardError, handle.OutputBuffer, true, bufferMaxChars);
 
-            await Task.WhenAll(stdoutTask, stderrTask);
-            await process.WaitForExitAsync();
+            var timeoutMinutes = settings.WorkerTimeoutMinutes > 0 ? settings.WorkerTimeoutMinutes : 30;
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMinutes));
+            var timedOut = false;
+
+            try
+            {
+                await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(timeoutCts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                timedOut = true;
+            }
+
+            if (timedOut && !process.HasExited)
+            {
+                _logger.LogWarning("Worker {WorkerId} timed out after {Minutes} minutes, killing process.", workerId, timeoutMinutes);
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception killEx) { _logger.LogWarning(killEx, "Failed to kill timed-out worker {WorkerId}.", workerId); }
+                await process.WaitForExitAsync();
+            }
 
             worker.ExitCode = process.ExitCode;
             worker.Status = process.ExitCode == 0 ? "completed" : "failed";
@@ -414,7 +461,7 @@ public sealed class AgentSupervisorService(
         }
     }
 
-    private async Task PumpStreamAsync(string runId, string workerId, StreamReader reader, StringBuilder buffer, bool isError)
+    private async Task PumpStreamAsync(string runId, string workerId, StreamReader reader, StringBuilder buffer, bool isError, int bufferMaxChars = 12000)
     {
         var chars = new char[1024];
         int count;
@@ -424,9 +471,9 @@ public sealed class AgentSupervisorService(
             lock (buffer)
             {
                 buffer.Append(chunk);
-                if (buffer.Length > 12000)
+                if (buffer.Length > bufferMaxChars)
                 {
-                    buffer.Remove(0, buffer.Length - 12000);
+                    buffer.Remove(0, buffer.Length - bufferMaxChars);
                 }
             }
 
@@ -434,7 +481,7 @@ public sealed class AgentSupervisorService(
         }
     }
 
-    private static CopilotLaunchPlan BuildWorkerLaunchPlan(SupervisorRun run, AgentWorkerSession worker, AgentRoleDefinition role, string prompt, string workspacePath)
+    private static CopilotLaunchPlan BuildWorkerLaunchPlan(SupervisorRun run, AgentWorkerSession worker, AgentRoleDefinition role, string prompt, string workspacePath, SupervisorSettings settings)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -448,6 +495,28 @@ public sealed class AgentSupervisorService(
             StandardErrorEncoding = Encoding.UTF8
         };
 
+        foreach (var kvp in settings.EnvironmentVariables ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(kvp.Key))
+            {
+                startInfo.Environment[kvp.Key] = kvp.Value;
+            }
+        }
+
+        foreach (var kvp in role.EnvironmentVariables ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(kvp.Key))
+            {
+                startInfo.Environment[kvp.Key] = kvp.Value;
+            }
+        }
+
+        var effectiveModel = string.IsNullOrWhiteSpace(role.Model) ? settings.DefaultModel : role.Model;
+        if (string.IsNullOrWhiteSpace(effectiveModel))
+        {
+            effectiveModel = "gpt-5.4";
+        }
+
         startInfo.ArgumentList.Add("copilot");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("-p");
@@ -456,7 +525,7 @@ public sealed class AgentSupervisorService(
         startInfo.ArgumentList.Add("--no-ask-user");
         startInfo.ArgumentList.Add($"--resume={worker.SessionId}");
         startInfo.ArgumentList.Add("--model");
-        startInfo.ArgumentList.Add(string.IsNullOrWhiteSpace(role.Model) ? "gpt-5.4" : role.Model);
+        startInfo.ArgumentList.Add(effectiveModel);
 
         if (role.AllowAllTools)
         {
@@ -479,6 +548,12 @@ public sealed class AgentSupervisorService(
         {
             startInfo.ArgumentList.Add("--add-dir");
             startInfo.ArgumentList.Add(workspacePath);
+
+            foreach (var path in NormalizeList(role.AllowedPaths))
+            {
+                startInfo.ArgumentList.Add("--add-dir");
+                startInfo.ArgumentList.Add(path);
+            }
         }
 
         if (role.AllowAllUrls)
@@ -541,7 +616,10 @@ public sealed class AgentSupervisorService(
 
     private async Task<OneShotResult> ExecuteOneShotAsync(string prompt, SupervisorRun run)
     {
-        var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot) ? FindWorkspaceRoot() : run.WorkspaceRoot!;
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
+        var supervisorModel = string.IsNullOrWhiteSpace(settings.SupervisorModel) ? "gpt-5.4" : settings.SupervisorModel;
+        var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot) ? FindWorkspaceRoot(settings) : run.WorkspaceRoot!;
         var startInfo = new ProcessStartInfo
         {
             FileName = "gh",
@@ -554,6 +632,14 @@ public sealed class AgentSupervisorService(
             StandardErrorEncoding = Encoding.UTF8
         };
 
+        foreach (var kvp in settings.EnvironmentVariables ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(kvp.Key))
+            {
+                startInfo.Environment[kvp.Key] = kvp.Value;
+            }
+        }
+
         startInfo.ArgumentList.Add("copilot");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("-p");
@@ -561,7 +647,7 @@ public sealed class AgentSupervisorService(
         startInfo.ArgumentList.Add("-s");
         startInfo.ArgumentList.Add("--no-ask-user");
         startInfo.ArgumentList.Add("--model");
-        startInfo.ArgumentList.Add("gpt-5.4");
+        startInfo.ArgumentList.Add(supervisorModel);
 
         var commandPreview = BuildCommandPreview(startInfo);
 
@@ -600,7 +686,16 @@ public sealed class AgentSupervisorService(
 
     private string BuildSupervisorPrompt(SupervisorRun run, string? extraInstruction)
     {
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
         var sb = new StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(settings.SupervisorPromptPrefix))
+        {
+            sb.AppendLine(settings.SupervisorPromptPrefix);
+            sb.AppendLine();
+        }
+
         sb.AppendLine("你是本地多角色 coding agent 控制台里的总调度员。请根据各角色当前汇报，给出下一轮最合理的调度建议。");
         sb.AppendLine($"总目标：{run.Goal}");
         sb.AppendLine($"Run 标题：{run.Title}");
@@ -637,7 +732,16 @@ public sealed class AgentSupervisorService(
 
     private string BuildStructuredSupervisorPrompt(SupervisorRun run, string? extraInstruction)
     {
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
         var sb = new StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(settings.SupervisorPromptPrefix))
+        {
+            sb.AppendLine(settings.SupervisorPromptPrefix);
+            sb.AppendLine();
+        }
+
         sb.AppendLine("你是本地多角色 coding agent 控制台里的总调度员。请根据当前 run 的状态，给出下一轮自动调度计划。你必须只输出 JSON，不要输出 Markdown、解释或代码块。");
         sb.AppendLine($"总目标：{run.Goal}");
         sb.AppendLine($"Run 标题：{run.Title}");
@@ -701,6 +805,23 @@ public sealed class AgentSupervisorService(
             throw new InvalidOperationException("At least one role must be defined.");
         }
 
+        var inputSettings = catalog?.Settings ?? new SupervisorSettings();
+        var normalizedSettings = new SupervisorSettings
+        {
+            SupervisorModel = string.IsNullOrWhiteSpace(inputSettings.SupervisorModel) ? "gpt-5.4" : inputSettings.SupervisorModel.Trim(),
+            SupervisorPromptPrefix = string.IsNullOrWhiteSpace(inputSettings.SupervisorPromptPrefix) ? null : inputSettings.SupervisorPromptPrefix.Trim(),
+            DefaultModel = string.IsNullOrWhiteSpace(inputSettings.DefaultModel) ? "gpt-5.4" : inputSettings.DefaultModel.Trim(),
+            DefaultMaxAutoSteps = Math.Max(1, inputSettings.DefaultMaxAutoSteps),
+            DefaultAutoPilotEnabled = inputSettings.DefaultAutoPilotEnabled,
+            MaxConcurrentWorkers = Math.Max(1, inputSettings.MaxConcurrentWorkers),
+            WorkerTimeoutMinutes = Math.Max(1, inputSettings.WorkerTimeoutMinutes),
+            DefaultVerificationCommand = string.IsNullOrWhiteSpace(inputSettings.DefaultVerificationCommand) ? null : inputSettings.DefaultVerificationCommand.Trim(),
+            OutputBufferMaxChars = Math.Max(1000, inputSettings.OutputBufferMaxChars),
+            DecisionHistoryLimit = Math.Max(10, inputSettings.DecisionHistoryLimit),
+            DefaultWorkspaceRoot = string.IsNullOrWhiteSpace(inputSettings.DefaultWorkspaceRoot) ? null : inputSettings.DefaultWorkspaceRoot.Trim(),
+            EnvironmentVariables = NormalizeDictionary(inputSettings.EnvironmentVariables)
+        };
+
         var normalizedRoles = new List<AgentRoleDefinition>(roles.Count);
         var seenRoleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -738,25 +859,32 @@ public sealed class AgentSupervisorService(
                 Description = string.IsNullOrWhiteSpace(role.Description) ? null : role.Description.Trim(),
                 Icon = string.IsNullOrWhiteSpace(role.Icon) ? null : role.Icon.Trim(),
                 PromptTemplate = promptTemplate,
-                Model = string.IsNullOrWhiteSpace(role.Model) ? "gpt-5.4" : role.Model.Trim(),
+                Model = string.IsNullOrWhiteSpace(role.Model) ? normalizedSettings.DefaultModel : role.Model.Trim(),
                 AllowAllTools = role.AllowAllTools,
                 AllowAllPaths = role.AllowAllPaths,
                 AllowAllUrls = role.AllowAllUrls,
                 WorkspacePath = string.IsNullOrWhiteSpace(role.WorkspacePath) ? "." : role.WorkspacePath.Trim(),
                 AllowedUrls = NormalizeList(role.AllowedUrls),
                 AllowedTools = NormalizeList(role.AllowedTools),
-                DeniedTools = NormalizeList(role.DeniedTools)
+                DeniedTools = NormalizeList(role.DeniedTools),
+                AllowedPaths = NormalizeList(role.AllowedPaths),
+                EnvironmentVariables = NormalizeDictionary(role.EnvironmentVariables)
             });
         }
 
         return new AgentRoleCatalog
         {
+            Settings = normalizedSettings,
             Roles = normalizedRoles
         };
     }
 
     private SupervisorRun AddDecision(SupervisorRun run, string kind, string summary)
     {
+        var catalog = _roleConfigService.Load();
+        var settings = catalog.Settings ?? new SupervisorSettings();
+        var limit = Math.Max(10, settings.DecisionHistoryLimit);
+
         run.Decisions.Add(new SupervisorDecisionEntry
         {
             Kind = kind,
@@ -764,9 +892,9 @@ public sealed class AgentSupervisorService(
             CreatedAt = DateTime.UtcNow
         });
 
-        if (run.Decisions.Count > 40)
+        if (run.Decisions.Count > limit)
         {
-            run.Decisions = run.Decisions[^40..];
+            run.Decisions = run.Decisions[^limit..];
         }
 
         return run;
@@ -915,8 +1043,17 @@ public sealed class AgentSupervisorService(
         return raw[start..(end + 1)];
     }
 
-    private static string FindWorkspaceRoot()
+    private static string FindWorkspaceRoot(SupervisorSettings? settings = null)
     {
+        if (settings is not null && !string.IsNullOrWhiteSpace(settings.DefaultWorkspaceRoot))
+        {
+            var configuredRoot = Path.GetFullPath(settings.DefaultWorkspaceRoot);
+            if (Directory.Exists(configuredRoot))
+            {
+                return configuredRoot;
+            }
+        }
+
         var candidates = new[]
         {
             Directory.GetCurrentDirectory(),
@@ -989,6 +1126,26 @@ public sealed class AgentSupervisorService(
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
+    }
+
+    private static Dictionary<string, string> NormalizeDictionary(IDictionary<string, string>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return [];
+        }
+
+        var result = new Dictionary<string, string>();
+        foreach (var kvp in values)
+        {
+            var key = kvp.Key?.Trim();
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                result[key] = kvp.Value ?? string.Empty;
+            }
+        }
+
+        return result;
     }
 
     private static string BuildCommandPreview(ProcessStartInfo startInfo)

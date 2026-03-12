@@ -3,6 +3,7 @@
 const AgentConsole = (() => {
     const state = {
         roles: [],
+        settings: {},
         runs: [],
         selectedRunId: null,
         selectedRoleId: null,
@@ -32,6 +33,7 @@ const AgentConsole = (() => {
         document.getElementById('btnCreateRun')?.addEventListener('click', createRun);
         document.getElementById('btnAddRole')?.addEventListener('click', addRole);
         document.getElementById('btnSaveRoles')?.addEventListener('click', saveRoles);
+        document.getElementById('btnSaveSettings')?.addEventListener('click', saveSettings);
     }
 
     function switchView(view) {
@@ -130,13 +132,16 @@ const AgentConsole = (() => {
 
     async function loadRoles() {
         try {
-            state.roles = await apiGet('/api/agent/roles').then(data => data.roles || []);
+            const data = await apiGet('/api/agent/roles');
+            state.roles = data.roles || [];
+            state.settings = data.settings || {};
             if (!state.selectedRoleId && state.roles.length > 0) {
                 state.selectedRoleId = state.roles[0].roleId;
             }
             renderRoleOptions();
             renderRolesList();
             renderRoleEditor();
+            renderSettingsEditor();
         } catch (err) {
             console.error('Failed to load roles:', err);
             notify('加载角色失败', 'error');
@@ -427,6 +432,10 @@ const AgentConsole = (() => {
                     <textarea class="agent-textarea" oninput="AgentConsole.updateRoleListField('allowedTools', this.value)">${escapeHtml(stringifyList(role.allowedTools))}</textarea>
                     <label class="agent-label">禁止的工具（每行一个，对应 <code>--deny-tool</code>）</label>
                     <textarea class="agent-textarea" oninput="AgentConsole.updateRoleListField('deniedTools', this.value)">${escapeHtml(stringifyList(role.deniedTools))}</textarea>
+                    <label class="agent-label">额外允许的路径（每行一个，对应 <code>--add-dir</code>；未勾选全部路径时生效）</label>
+                    <textarea class="agent-textarea" oninput="AgentConsole.updateRoleListField('allowedPaths', this.value)">${escapeHtml(stringifyList(role.allowedPaths))}</textarea>
+                    <label class="agent-label">环境变量（每行一个 <code>KEY=VALUE</code>）</label>
+                    <textarea class="agent-textarea" oninput="AgentConsole.updateRoleDictField('environmentVariables', this.value)">${escapeHtml(stringifyDict(role.environmentVariables))}</textarea>
                 </section>
 
                 <section class="agent-form-card">
@@ -632,14 +641,16 @@ const AgentConsole = (() => {
             description: '',
             icon: '🎭',
             promptTemplate: '项目目标：{{goal}}。你的角色：{{roleName}}。请开始工作，并在结尾输出 STATUS / SUMMARY / NEXT。',
-            model: 'gpt-5.4',
+            model: state.settings.defaultModel || 'gpt-5.4',
             allowAllTools: true,
             allowAllPaths: false,
             allowAllUrls: false,
             workspacePath: '.',
             allowedUrls: [],
             allowedTools: [],
-            deniedTools: []
+            deniedTools: [],
+            allowedPaths: [],
+            environmentVariables: {}
         };
 
         state.roles.push(role);
@@ -683,8 +694,9 @@ const AgentConsole = (() => {
         }
 
         try {
-            const saved = await apiPut('/api/agent/roles', { roles: state.roles });
+            const saved = await apiPut('/api/agent/roles', { settings: state.settings, roles: state.roles });
             state.roles = saved.roles || [];
+            state.settings = saved.settings || {};
             if (!state.selectedRoleId && state.roles.length > 0) {
                 state.selectedRoleId = state.roles[0].roleId;
             } else if (state.selectedRoleId && !state.roles.some(item => item.roleId === state.selectedRoleId)) {
@@ -693,6 +705,7 @@ const AgentConsole = (() => {
             renderRoleOptions();
             renderRolesList();
             renderRoleEditor();
+            renderSettingsEditor();
             notify('角色已保存', 'success');
         } catch (err) {
             console.error('Failed to save roles:', err);
@@ -907,6 +920,9 @@ const AgentConsole = (() => {
             args.push('--allow-all-paths');
         } else {
             args.push('--add-dir', quoteCommandArg(role.workspacePath || '.'));
+            (role.allowedPaths || []).forEach(p => {
+                args.push('--add-dir', quoteCommandArg(p));
+            });
         }
 
         if (role.allowAllUrls) {
@@ -922,6 +938,116 @@ const AgentConsole = (() => {
         });
 
         return args.join(' ');
+    }
+
+    function updateRoleDictField(field, value) {
+        const role = state.roles.find(item => item.roleId === state.selectedRoleId);
+        if (!role) {
+            return;
+        }
+
+        role[field] = parseDictInput(value);
+    }
+
+    function renderSettingsEditor() {
+        const container = document.getElementById('settingsEditor');
+        if (!container) {
+            return;
+        }
+
+        const s = state.settings || {};
+
+        container.innerHTML = `
+            <div class="agent-detail-shell">
+                <section class="agent-form-card">
+                    <h3>🤖 Supervisor（调度员）配置</h3>
+                    <p class="agent-helper-text">控制自动调度员的模型和行为。Supervisor 负责在每轮自动推进时决定如何分配任务。</p>
+                    <label class="agent-label">Supervisor 模型</label>
+                    <input class="agent-input" type="text" value="${escapeAttr(s.supervisorModel || 'gpt-5.4')}" oninput="AgentConsole.updateSettingsField('supervisorModel', this.value)">
+                    <label class="agent-label">Supervisor 提示词前缀（可选，会插入到每次调度 prompt 开头）</label>
+                    <textarea class="agent-textarea agent-textarea-lg" oninput="AgentConsole.updateSettingsField('supervisorPromptPrefix', this.value)">${escapeHtml(s.supervisorPromptPrefix || '')}</textarea>
+                </section>
+
+                <section class="agent-form-card">
+                    <h3>🎯 角色全局默认值</h3>
+                    <p class="agent-helper-text">新角色创建时的默认配置；角色自身配置优先于此处。</p>
+                    <label class="agent-label">默认模型</label>
+                    <input class="agent-input" type="text" value="${escapeAttr(s.defaultModel || 'gpt-5.4')}" oninput="AgentConsole.updateSettingsField('defaultModel', this.value)">
+                    <label class="agent-label">默认工作目录（留空则自动检测 .sln 所在目录）</label>
+                    <input class="agent-input" type="text" value="${escapeAttr(s.defaultWorkspaceRoot || '')}" oninput="AgentConsole.updateSettingsField('defaultWorkspaceRoot', this.value)">
+                </section>
+
+                <section class="agent-form-card">
+                    <h3>🚀 Run 默认参数</h3>
+                    <p class="agent-helper-text">创建新 Run 时的默认配置。</p>
+                    <label class="agent-label">默认最大自动推进轮次</label>
+                    <input class="agent-input" type="number" min="1" max="100" value="${s.defaultMaxAutoSteps ?? 6}" oninput="AgentConsole.updateSettingsField('defaultMaxAutoSteps', parseInt(this.value) || 6)">
+                    <label class="agent-checkbox-row">
+                        <input type="checkbox" ${s.defaultAutoPilotEnabled !== false ? 'checked' : ''} onchange="AgentConsole.updateSettingsField('defaultAutoPilotEnabled', this.checked)">
+                        <span>默认启用自动驾驶（AutoPilot）</span>
+                    </label>
+                    <label class="agent-label">默认验证命令（留空则自动检测 dotnet build / npm build 等）</label>
+                    <input class="agent-input" type="text" value="${escapeAttr(s.defaultVerificationCommand || '')}" oninput="AgentConsole.updateSettingsField('defaultVerificationCommand', this.value)">
+                </section>
+
+                <section class="agent-form-card">
+                    <h3>🛡️ 安全与限制</h3>
+                    <label class="agent-label">最大并发 Worker 数量</label>
+                    <input class="agent-input" type="number" min="1" max="20" value="${s.maxConcurrentWorkers ?? 4}" oninput="AgentConsole.updateSettingsField('maxConcurrentWorkers', parseInt(this.value) || 4)">
+                    <label class="agent-label">Worker 超时时间（分钟，超时后自动终止进程）</label>
+                    <input class="agent-input" type="number" min="1" max="1440" value="${s.workerTimeoutMinutes ?? 30}" oninput="AgentConsole.updateSettingsField('workerTimeoutMinutes', parseInt(this.value) || 30)">
+                    <label class="agent-label">输出缓冲区最大字符数</label>
+                    <input class="agent-input" type="number" min="1000" max="100000" value="${s.outputBufferMaxChars ?? 12000}" oninput="AgentConsole.updateSettingsField('outputBufferMaxChars', parseInt(this.value) || 12000)">
+                    <label class="agent-label">决策历史保留条数</label>
+                    <input class="agent-input" type="number" min="10" max="500" value="${s.decisionHistoryLimit ?? 40}" oninput="AgentConsole.updateSettingsField('decisionHistoryLimit', parseInt(this.value) || 40)">
+                </section>
+
+                <section class="agent-form-card">
+                    <h3>🌐 全局环境变量</h3>
+                    <p class="agent-helper-text">每行一个 <code>KEY=VALUE</code>，将注入到所有 Worker 和 Supervisor 进程中。角色自身的环境变量会覆盖此处的同名变量。</p>
+                    <textarea class="agent-textarea agent-textarea-lg" oninput="AgentConsole.updateSettingsField('environmentVariables', AgentConsole.parseDictInput(this.value))">${escapeHtml(stringifyDict(s.environmentVariables))}</textarea>
+                </section>
+            </div>
+        `;
+    }
+
+    async function saveSettings() {
+        try {
+            const saved = await apiPut('/api/agent/settings', state.settings);
+            state.settings = saved || {};
+            renderSettingsEditor();
+            notify('设置已保存', 'success');
+        } catch (err) {
+            console.error('Failed to save settings:', err);
+            notify(err.message || '保存设置失败', 'error');
+        }
+    }
+
+    function updateSettingsField(field, value) {
+        state.settings = state.settings || {};
+        state.settings[field] = value;
+    }
+
+    function parseDictInput(value) {
+        const result = {};
+        (value || '').split(/\r?\n/).forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                return;
+            }
+            const eqIdx = trimmed.indexOf('=');
+            if (eqIdx > 0) {
+                result[trimmed.substring(0, eqIdx).trim()] = trimmed.substring(eqIdx + 1).trim();
+            }
+        });
+        return result;
+    }
+
+    function stringifyDict(dict) {
+        if (!dict || typeof dict !== 'object') {
+            return '';
+        }
+        return Object.entries(dict).map(([k, v]) => `${k}=${v}`).join('\n');
     }
 
     function quoteCommandArg(value) {
@@ -951,7 +1077,11 @@ const AgentConsole = (() => {
         saveRoles,
         removeRole,
         updateRoleField,
-        updateRoleListField
+        updateRoleListField,
+        updateRoleDictField,
+        saveSettings,
+        updateSettingsField,
+        parseDictInput
     };
 })();
 

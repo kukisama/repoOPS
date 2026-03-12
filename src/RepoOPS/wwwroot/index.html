@@ -25,6 +25,7 @@
             <button class="workspace-tab active" data-view="tasks">🧮 练习</button>
             <button class="workspace-tab" data-view="runs">🧠 Runs</button>
             <button class="workspace-tab" data-view="roles">🎭 Roles</button>
+            <button class="workspace-tab" data-view="settings">⚙️ Settings</button>
         </nav>
 
         <section class="workspace-view active" id="view-tasks">
@@ -152,6 +153,22 @@
                     </div>
                     <div id="roleEditor" class="workspace-scroll-panel">
                         <div class="workspace-empty-state">选择一个角色开始编辑。</div>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-settings">
+            <div class="main-content">
+                <main class="output-panel" style="flex: 1;">
+                    <div class="panel-header">
+                        <h2>⚙️ 超级管理员设置</h2>
+                        <div class="panel-header-actions">
+                            <button id="btnSaveSettings" class="btn-icon" type="button" title="保存设置">💾</button>
+                        </div>
+                    </div>
+                    <div id="settingsEditor" class="workspace-scroll-panel">
+                        <div class="workspace-empty-state">正在加载设置...</div>
                     </div>
                 </main>
             </div>

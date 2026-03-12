@@ -82,6 +82,31 @@ public static class RepoOpsWebApp
             return Results.Ok(saved);
         });
 
+        app.MapGet("/api/agent/settings", (AgentSupervisorService supervisorService) =>
+        {
+            var catalog = supervisorService.GetRoles();
+            return Results.Ok(catalog.Settings ?? new SupervisorSettings());
+        });
+
+        app.MapPut("/api/agent/settings", async (HttpRequest request, AgentSupervisorService supervisorService) =>
+        {
+            var settings = await request.ReadFromJsonAsync<SupervisorSettings>();
+            if (settings == null)
+            {
+                return Results.BadRequest(new { error = "Invalid settings" });
+            }
+
+            try
+            {
+                var saved = supervisorService.SaveSettings(settings);
+                return Results.Ok(saved);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
         app.MapGet("/api/agent/runs", (AgentSupervisorService supervisorService) => Results.Ok(supervisorService.GetRuns()));
 
         app.MapGet("/api/agent/runs/{runId}", (string runId, AgentSupervisorService supervisorService) =>
