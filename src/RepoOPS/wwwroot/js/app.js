@@ -574,6 +574,11 @@ function toggleGroup(groupId) {
 // ===== Task Execution =====
 
 async function runTask(taskId, taskName) {
+    if (typeof PtyTerminal !== 'undefined') {
+        PtyTerminal.runTask(taskId, taskName);
+        return;
+    }
+
     if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
         alert(I18n.t('alert.notConnected'));
         return;
@@ -590,6 +595,11 @@ async function runTask(taskId, taskName) {
 
 async function stopCurrentTask() {
     if (!activeTabId) return;
+
+    if (typeof PtyTerminal !== 'undefined' && PtyTerminal.isPtySession(activeTabId)) {
+        PtyTerminal.stopSession(activeTabId);
+        return;
+    }
 
     const info = terminals.get(activeTabId);
     if (!info || !info.isRunning) return;
@@ -898,6 +908,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
     initResizeHandle();
     initWindowResize();
+    if (typeof PtyTerminal !== 'undefined') PtyTerminal.init();
 
     document.addEventListener('click', hideTaskContextMenu);
     document.addEventListener('scroll', hideTaskContextMenu, true);

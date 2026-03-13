@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using RepoOPS.Agents.Services;
 using RepoOPS.Host;
 
 namespace RepoOPS.Desktop;
@@ -65,6 +67,12 @@ internal static class Program
             {
                 try
                 {
+                    var supervisorService = app.Services.GetService<AgentSupervisorService>();
+                    if (supervisorService is not null)
+                    {
+                        supervisorService.StopAllWorkersAsync().GetAwaiter().GetResult();
+                    }
+
                     app.StopAsync().GetAwaiter().GetResult();
                 }
                 catch

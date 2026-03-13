@@ -50,34 +50,54 @@ public sealed class RunVerificationService(ILogger<RunVerificationService> logge
         startInfo.ArgumentList.Add("-Command");
         startInfo.ArgumentList.Add(command);
 
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
+            try
+            {
+                using var process = new Process { StartInfo = startInfo };
+                process.Start();
 
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+                var stdout = await process.StandardOutput.ReadToEndAsync();
+                var stderr = await process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync();
 
-        var output = string.Concat(stdout, string.IsNullOrWhiteSpace(stderr) ? string.Empty : $"\r\n[stderr]\r\n{stderr}");
-        var passed = process.ExitCode == 0;
-        var summary = passed
-            ? "Verification passed."
-            : $"Verification failed with exit code {process.ExitCode}.";
+                var output = string.Concat(stdout, string.IsNullOrWhiteSpace(stderr) ? string.Empty : $"\r\n[stderr]\r\n{stderr}");
+                var passed = process.ExitCode == 0;
+                var summary = passed
+                    ? "Verification passed."
+                    : $"Verification failed with exit code {process.ExitCode}.";
 
-        _logger.LogInformation("Verification finished with exit code {ExitCode}.", process.ExitCode);
+                _logger.LogInformation("Verification finished with exit code {ExitCode}.", process.ExitCode);
 
-        return new RunVerificationRecord
-        {
-            VerificationId = Guid.NewGuid().ToString("N"),
-            Name = "Workspace verification",
-            Command = command,
-            Status = passed ? "passed" : "failed",
-            Passed = passed,
-            ExitCode = process.ExitCode,
-            StartedAt = startedAt,
-            CompletedAt = DateTime.UtcNow,
-            Summary = summary,
-            OutputPreview = TrimOutput(output)
-        };
+                return new RunVerificationRecord
+                {
+                    VerificationId = Guid.NewGuid().ToString("N"),
+                    Name = "Workspace verification",
+                    Command = command,
+                    Status = passed ? "passed" : "failed",
+                    Passed = passed,
+                    ExitCode = process.ExitCode,
+                    StartedAt = startedAt,
+                    CompletedAt = DateTime.UtcNow,
+                    Summary = summary,
+                    OutputPreview = TrimOutput(output)
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Verification command execution failed.");
+                return new RunVerificationRecord
+                {
+                    VerificationId = Guid.NewGuid().ToString("N"),
+                    Name = "Workspace verification",
+                    Command = command,
+                    Status = "failed",
+                    Passed = false,
+                    ExitCode = -1,
+                    StartedAt = startedAt,
+                    CompletedAt = DateTime.UtcNow,
+                    Summary = $"Verification execution failed: {ex.Message}",
+                    OutputPreview = TrimOutput(ex.ToString())
+                };
+            }
     }
 
     private static string? FindWorkspaceRoot()

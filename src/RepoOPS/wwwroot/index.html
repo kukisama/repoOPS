@@ -5,27 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>数学小练习 - 小学作业</title>
     <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/app.editor.css">
     <link rel="stylesheet" href="lib/xterm.min.css">
 </head>
 <body>
     <div class="app-container">
         <header class="app-header">
             <div class="header-left">
-                <h1>🧮 数学小练习</h1>
-                <span class="header-subtitle" data-i18n="app.subtitle">Elementary Math Trainer</span>
+                <h1>🧠 RepoOPS 协作控制台</h1>
+                <span class="header-subtitle">多角色协作、调度与运行观测</span>
             </div>
             <div class="header-right">
                 <button id="btnThemeSwitch" class="btn-theme" onclick="Theme.toggleTheme()" title="切换主题">☀️ 明亮</button>
                 <button id="btnLangSwitch" class="btn-lang" onclick="I18n.toggleLanguage()">中文</button>
-                <span id="connectionStatus" class="status-indicator status-disconnected" data-i18n="status.disconnected">● Disconnected</span>
+                <span id="connectionStatus" class="status-indicator status-disconnected">● 未连接</span>
             </div>
         </header>
 
         <nav class="workspace-nav" id="workspaceNav">
             <button class="workspace-tab active" data-view="tasks">🧮 练习</button>
-            <button class="workspace-tab" data-view="runs">🧠 Runs</button>
-            <button class="workspace-tab" data-view="roles">🎭 Roles</button>
-            <button class="workspace-tab" data-view="settings">⚙️ Settings</button>
+            <button class="workspace-tab" data-view="runs">🧠 协作运行</button>
+            <button class="workspace-tab" data-view="ai-assistant">✨ AI助手</button>
+            <button class="workspace-tab" data-view="ai-v2">🚀 AI助手V2</button>
+            <button class="workspace-tab" data-view="roles">🎭 角色库</button>
+            <button class="workspace-tab" data-view="settings">⚙️ 调度设置</button>
         </nav>
 
         <section class="workspace-view active" id="view-tasks">
@@ -93,31 +96,38 @@
             <div class="main-content workspace-main-content">
                 <aside class="task-panel workspace-sidebar">
                     <div class="panel-header">
-                        <h2>🧠 Runs</h2>
+                        <h2>🧠 协作运行</h2>
                     </div>
                     <div class="workspace-sidebar-body">
                         <div class="agent-form-card">
-                            <div class="agent-form-title">新建 Run</div>
+                            <div class="agent-form-title">新建协作运行</div>
                             <label class="agent-label" for="runTitleInput">标题</label>
                             <input id="runTitleInput" class="agent-input" type="text" placeholder="例如：RepoOPS agent supervisor MVP">
                             <label class="agent-label" for="runGoalInput">总目标</label>
                             <textarea id="runGoalInput" class="agent-textarea" placeholder="描述这轮多角色协作要完成的事情"></textarea>
                             <label class="agent-label" for="runWorkspaceRootInput">项目起始目录</label>
-                            <input id="runWorkspaceRootInput" class="agent-input" type="text" placeholder="默认 . （相对仓库根目录）；例如 src\RepoOPS 或 .">
-                            <div class="agent-helper-text">这是本轮 Run 的起点目录。各角色里的“工作路径”会基于这里继续细分。</div>
+                            <input id="runWorkspaceRootInput" class="agent-input" type="text" placeholder="留空则使用 EXE 根目录并自动创建英文任务目录；手动填写时这里就是硬边界目录">
+                            <div class="agent-helper-text">留空时会在 EXE 根目录下自动创建一个短英文任务目录并初始化 git / copilot-instructions。手动填写真实目录时，所有访问都不得超出该目录。</div>
+                            <div id="runWorkspaceRootResolvedHint" class="agent-helper-text">当前默认根目录：未设置；留空时将退回到应用 EXE 根目录。</div>
                             <label class="agent-checkbox-row">
                                 <input id="runAutopilotInput" type="checkbox" checked>
                                 <span>创建后自动推进</span>
                             </label>
                             <label class="agent-label" for="runMaxAutoStepsInput">最大自动推进轮次</label>
                             <input id="runMaxAutoStepsInput" class="agent-input" type="number" min="1" max="20" value="6">
+                            <div class="inline-actions">
+                                <button id="btnSuggestRoles" class="editor-btn-secondary" type="button" title="先让 AI 看目标与现有角色池，给你一份更省心的分工建议。">AI 建议角色</button>
+                            </div>
+                            <div class="agent-helper-text">按钮提示：<strong>AI 建议角色</strong> 会先想好怎么分工；<strong>创建并启动</strong> 会直接建工作区、保存配置并把角色们叫起来开工。</div>
                             <div class="agent-label">角色</div>
                             <div id="runRoleOptions" class="agent-checklist"></div>
-                            <button id="btnCreateRun" class="editor-btn-primary agent-primary-btn" type="button">创建并启动</button>
+                            <div id="runRoleProposalPanel" class="agent-proposal-panel"></div>
+                            <div id="runFeedbackPanel" class="agent-feedback-panel" aria-live="polite" hidden></div>
+                            <button id="btnCreateRun" class="editor-btn-primary agent-primary-btn" type="button" title="按当前目标与角色直接创建一条协作运行，并马上启动首批角色。">创建并启动</button>
                         </div>
 
                         <div class="agent-list-section">
-                            <div class="agent-form-title">最近 Runs</div>
+                            <div class="agent-form-title">最近协作运行</div>
                             <div id="runsList" class="agent-list"></div>
                         </div>
                     </div>
@@ -125,10 +135,140 @@
 
                 <main class="output-panel workspace-detail-panel">
                     <div class="panel-header">
-                        <h2>📡 Run Detail</h2>
+                        <h2>📡 运行详情</h2>
                     </div>
                     <div id="runDetail" class="workspace-scroll-panel">
                         <div class="workspace-empty-state">选择左侧 Run，或者先创建一个新的协作任务。</div>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-ai-assistant">
+            <div class="main-content workspace-main-content">
+                <aside class="task-panel workspace-sidebar">
+                    <div class="panel-header">
+                        <h2>✨ AI 助手</h2>
+                    </div>
+                    <div class="workspace-sidebar-body">
+                        <div class="agent-form-card">
+                            <div class="agent-form-title">滚动轮次设计</div>
+                            <label class="agent-label" for="assistantTitleInput">标题</label>
+                            <input id="assistantTitleInput" class="agent-input" type="text" placeholder="例如：OpenClaw WPF 首批智能编排">
+                            <label class="agent-label" for="assistantGoalInput">总目标</label>
+                            <textarea id="assistantGoalInput" class="agent-textarea" placeholder="描述 AI 助手应该如何理解任务、如何设计首轮与后续滚动轮次"></textarea>
+                            <label class="agent-label" for="assistantWorkspaceRootInput">项目起始目录</label>
+                            <input id="assistantWorkspaceRootInput" class="agent-input" type="text" placeholder="留空则使用默认工作区根目录">
+                            <div class="settings-grid settings-grid-2 compact-grid">
+                                <div>
+                                    <label class="agent-label" for="assistantInitialRoundsInput">首批展示轮次</label>
+                                    <input id="assistantInitialRoundsInput" class="agent-input" type="number" min="1" max="3" value="3">
+                                </div>
+                                <div>
+                                    <label class="agent-label" for="assistantBatchSizeInput">每批规划轮次</label>
+                                    <input id="assistantBatchSizeInput" class="agent-input" type="number" min="1" max="3" value="3">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="agent-label" for="assistantMaxRoundsInput">最大总轮次</label>
+                                <input id="assistantMaxRoundsInput" class="agent-input" type="number" min="3" max="9" value="9">
+                            </div>
+                            <label class="agent-checkbox-row">
+                                <input id="assistantFullAutoInput" type="checkbox" checked>
+                                <span>启用全自动推进（默认由超管自己判断是否继续下一轮）</span>
+                            </label>
+                            <div class="agent-helper-text">默认按“先设计当前轮，后预测两轮”的方式滚动推进；正常情况建议一轮 2~3 个角色，默认单写者。</div>
+                            <div class="inline-actions">
+                                <button id="btnGenerateAssistantPlan" class="editor-btn-primary" type="button">生成 AI 方案</button>
+                                <button id="btnCreateRunFromAssistantPlan" class="editor-btn-secondary" type="button">按方案创建 Run</button>
+                            </div>
+                            <div id="assistantFeedbackPanel" class="agent-feedback-panel" aria-live="polite" hidden></div>
+                        </div>
+
+                        <div class="agent-list-section">
+                            <div class="agent-form-title">最近方案</div>
+                            <div id="assistantPlansList" class="agent-list"></div>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="output-panel workspace-detail-panel">
+                    <div class="panel-header">
+                        <h2>🗺️ 方案详情</h2>
+                    </div>
+                    <div id="assistantPlanDetail" class="workspace-scroll-panel">
+                        <div class="workspace-empty-state">先让 AI 助手生成一份方案，它会展示当前确定轮次、后续预测轮次、情报共享协议和 skill 沉淀。</div>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-ai-v2">
+            <div class="main-content v2-main-content">
+                <aside class="task-panel v2-sidebar">
+                    <div class="panel-header">
+                        <h2>🚀 AI助手V2</h2>
+                    </div>
+                    <div class="workspace-sidebar-body">
+                        <div class="agent-form-card">
+                            <div class="agent-form-title">自驱动调度</div>
+                            <label class="agent-label" for="v2GoalInput">总目标</label>
+                            <textarea id="v2GoalInput" class="agent-textarea" placeholder="描述项目目标，V2调度器会自行选择角色、分配任务、审查结果"></textarea>
+                            <label class="agent-label" for="v2WorkspaceInput">工作目录</label>
+                            <input id="v2WorkspaceInput" class="agent-input" type="text" placeholder="留空使用默认工作区">
+                            <label class="agent-label" for="v2MaxRoundsInput">最大轮次</label>
+                            <input id="v2MaxRoundsInput" class="agent-input" type="number" min="1" max="20" value="6">
+                            <div class="agent-helper-text">V2 模式：输入目标后一键启动，主线程自动规划角色、派发任务、审查交付。所有角色都声称完成时会自动触发独立 Review。</div>
+                            <div class="inline-actions">
+                                <button id="btnV2Start" class="editor-btn-primary" type="button">🚀 开始执行</button>
+                                <button id="btnV2Stop" class="editor-btn-secondary" type="button" disabled>⏹ 停止</button>
+                                <button id="btnV2CopilotTest" class="editor-btn-secondary" type="button">🧪 测试</button>
+                            </div>
+                            <div id="v2FeedbackPanel" class="agent-feedback-panel" aria-live="polite" hidden></div>
+                        </div>
+                        <div class="agent-list-section">
+                            <div class="agent-form-title">最近 V2 运行</div>
+                            <div id="v2RunsList" class="agent-list"></div>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="output-panel v2-detail-panel">
+                    <div class="panel-header">
+                        <h2 id="v2DetailTitle">📡 调度详情</h2>
+                        <div class="v2-round-badge" id="v2RoundBadge" hidden>Round 0/0</div>
+                    </div>
+                    <div id="v2DetailBody" class="v2-detail-body">
+                        <div class="v2-main-thread-panel" id="v2MainThreadPanel">
+                            <div class="v2-section-header">🧵 主线程</div>
+                            <div id="v2MainThreadCmd" class="v2-cmd-preview" hidden>
+                                <div class="v2-cmd-preview-header" onclick="this.parentElement.classList.toggle('expanded')">
+                                    <span>▶ 执行命令</span>
+                                </div>
+                                <pre class="v2-cmd-preview-body"></pre>
+                            </div>
+                            <div id="v2MainThreadOutput" class="v2-terminal-output">
+                                <div class="workspace-empty-state">启动后主线程终端将在这里显示</div>
+                            </div>
+                        </div>
+                        <div class="v2-resize-handle" id="v2ResizeHandle" title="拖动调整大小"></div>
+                        <div class="v2-workers-panel" id="v2WorkersPanel">
+                            <div class="v2-section-header">👥 子线程</div>
+                            <div id="v2WorkerTabs" class="v2-worker-tabs"></div>
+                            <div id="v2WorkerCmd" class="v2-cmd-preview" hidden>
+                                <div class="v2-cmd-preview-header" onclick="this.parentElement.classList.toggle('expanded')">
+                                    <span>▶ 执行命令</span>
+                                </div>
+                                <pre class="v2-cmd-preview-body"></pre>
+                            </div>
+                            <div id="v2WorkerOutputs" class="v2-worker-outputs">
+                                <div class="workspace-empty-state">等待主线程派发任务…</div>
+                            </div>
+                        </div>
+                        <div class="v2-decisions-panel">
+                            <div class="v2-section-header">📋 决策日志</div>
+                            <div id="v2DecisionLog" class="v2-decision-log"></div>
+                        </div>
                     </div>
                 </main>
             </div>
@@ -138,7 +278,7 @@
             <div class="main-content workspace-main-content">
                 <aside class="task-panel workspace-sidebar">
                     <div class="panel-header">
-                        <h2>🎭 Roles</h2>
+                        <h2>🎭 角色库</h2>
                         <div class="panel-header-actions">
                             <button id="btnAddRole" class="btn-icon" type="button" title="添加角色">➕</button>
                             <button id="btnSaveRoles" class="btn-icon" type="button" title="保存角色">💾</button>
@@ -149,7 +289,7 @@
 
                 <main class="output-panel workspace-detail-panel">
                     <div class="panel-header">
-                        <h2>📝 Role Editor</h2>
+                        <h2>📝 角色编辑器</h2>
                     </div>
                     <div id="roleEditor" class="workspace-scroll-panel">
                         <div class="workspace-empty-state">选择一个角色开始编辑。</div>
@@ -162,7 +302,7 @@
             <div class="main-content">
                 <main class="output-panel" style="flex: 1;">
                     <div class="panel-header">
-                        <h2>⚙️ 超级管理员设置</h2>
+                        <h2>⚙️ 调度与执行设置</h2>
                         <div class="panel-header-actions">
                             <button id="btnSaveSettings" class="btn-icon" type="button" title="保存设置">💾</button>
                         </div>
@@ -181,6 +321,17 @@
     <script src="js/i18n.js"></script>
     <script src="js/config-editor.js"></script>
     <script src="js/app.js"></script>
-    <script src="js/agent-console.js"></script>
+    <script src="js/pty-terminal.js"></script>
+    <script src="js/agent-console/core.js"></script>
+    <script src="js/agent-console/runs.js"></script>
+    <script src="js/agent-console/runs.render.js"></script>
+    <script src="js/agent-console/runs.controller.js"></script>
+    <script src="js/agent-console/ai-assistant.js"></script>
+    <script src="js/agent-console/ai-assistant.render.js"></script>
+    <script src="js/agent-console/ai-assistant.controller.js"></script>
+    <script src="js/agent-console/roles.js"></script>
+    <script src="js/agent-console/settings.js"></script>
+    <script src="js/agent-console/ai-v2.js"></script>
+    <script src="js/agent-console/boot.js"></script>
 </body>
 </html>
