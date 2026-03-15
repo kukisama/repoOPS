@@ -1,5 +1,14 @@
 (function () {
     const AgentConsole = window.AgentConsole;
+    const V3_ROLE_HINTS = {
+        helmsman: 'AI助手V3 主线角色：像项目经理 / 产品负责人一样先给出完整整体计划，阶段数必须在 1~4 之间，但由 AI 自己判断；之后定义当前阶段、验收、边界与任务卡。除非有明确硬约束，否则不要替子线程把技术方案写死。',
+        pathfinder: 'AI助手V3 子线角色：知道总目标、整体计划、当前阶段和红线，在任务卡约束内自主决定实现与 UI/UX 落地，并把本轮主动微调如实汇报给主线裁决。',
+        'redteam-wingman': 'AI助手V3 助攻角色：只在用户勾选时一次性出手，强化插嘴里的风险、边界和反例提醒，供主线参考，但不改写用户原话，更不常驻参与每轮。'
+    };
+
+    function getV3RoleHint(roleId) {
+        return V3_ROLE_HINTS[String(roleId || '').trim().toLowerCase()] || null;
+    }
 
     function getSelectedRole() {
         return AgentConsole.state.roles.find(role => role.roleId === AgentConsole.state.selectedRoleId) || null;
@@ -75,6 +84,8 @@
             return;
         }
 
+        const v3RoleHint = getV3RoleHint(role.roleId);
+
         container.innerHTML = `
             <div class="agent-detail-shell" data-role-editor-root data-role-id="${AgentConsole.utils.escapeHtml(role.roleId)}">
                 <div class="agent-hero-card">
@@ -82,6 +93,7 @@
                         <div class="agent-eyebrow">Role Profile</div>
                         <h2>${AgentConsole.utils.escapeHtml(role.icon || '🎭')} ${AgentConsole.utils.escapeHtml(role.name || role.roleId)}</h2>
                         <p>${AgentConsole.utils.escapeHtml(role.description || '这里定义角色职责、工作路径、权限边界和提示词模板。')}</p>
+                        ${v3RoleHint ? `<div class="agent-helper-text" style="margin-top:10px;">${AgentConsole.utils.escapeHtml(v3RoleHint)}</div>` : ''}
                     </div>
                     <div class="agent-hero-actions">
                         <button class="editor-btn-secondary" type="button" data-role-action="duplicate">复制角色</button>
@@ -117,9 +129,10 @@
                     <div class="section-title-row"><h3>工作上下文</h3></div>
                     <label class="agent-label">工作路径</label>
                     <input class="agent-input" name="workspacePath" type="text" value="${AgentConsole.utils.escapeHtml(role.workspacePath || '.')}" placeholder="留空表示 .">
-                    <div class="agent-helper-text">相对于 Run 仓库根的相对路径；留空就表示 <code>.</code>。注意：<code>gh</code> 实际总是从 Run 仓库根启动，这里定义的是该角色默认关注/作用的子目录范围。</div>
+                    <div class="agent-helper-text">相对于 Run 仓库根的相对路径；留空就表示 <code>.</code>。注意：<code>copilot</code> 实际总是从 Run 仓库根启动，这里定义的是该角色默认关注/作用的子目录范围。</div>
                     <label class="agent-label">Prompt 模板</label>
                     <textarea class="agent-textarea agent-textarea-lg textarea-code" name="promptTemplate" placeholder="支持 {{goal}} / {{roleName}} / {{roleDescription}} / {{runTitle}} / {{peerRoles}}">${AgentConsole.utils.escapeHtml(role.promptTemplate || '')}</textarea>
+                    <div class="agent-helper-text">常用变量：<code>{{goal}}</code>、<code>{{roleName}}</code>、<code>{{roleDescription}}</code>、<code>{{runTitle}}</code>。V3 角色还支持 <code>{{taskCard}}</code>、<code>{{reviewDirective}}</code>、<code>{{partnerName}}</code>、<code>{{partnerSummary}}</code>、<code>{{roundNumber}}</code>、<code>{{reviewFocus}}</code>、<code>{{workspaceName}}</code>、<code>{{stagePlanSummary}}</code>、<code>{{currentStage}}</code>、<code>{{currentStageGoal}}</code>、<code>{{architectureGuardrails}}</code>、<code>{{changeDecision}}</code>。</div>
                 </div>
 
                 <div class="settings-section">
@@ -129,7 +142,7 @@
                         <label class="agent-checkbox-row"><input name="allowAllPaths" type="checkbox" ${role.allowAllPaths ? 'checked' : ''}> <span>允许所有目录</span></label>
                         <label class="agent-checkbox-row"><input name="allowAllUrls" type="checkbox" ${role.allowAllUrls ? 'checked' : ''}> <span>允许所有 URL</span></label>
                     </div>
-                    <div class="agent-helper-text">想要“直接执行、不弹窗，但路径绝不越界”：推荐保持 <code>允许所有工具=开</code>、<code>允许所有目录=关</code>。留空工作路径就等于 <code>.</code>，而 <code>gh</code> 会从 Run 仓库根启动；这样工具放开，但目录仍锁在当前 Run 根目录树内。</div>
+                    <div class="agent-helper-text">想要“直接执行、不弹窗，但路径绝不越界”：推荐保持 <code>允许所有工具=开</code>、<code>允许所有目录=关</code>。留空工作路径就等于 <code>.</code>，而 <code>copilot</code> 会从 Run 仓库根启动；这样工具放开，但目录仍锁在当前 Run 根目录树内。</div>
                     <div class="settings-grid settings-grid-3">
                         <div>
                             <label class="agent-label">允许工具</label>

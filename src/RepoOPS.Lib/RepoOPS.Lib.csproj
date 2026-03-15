@@ -12,4 +12,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Agents\Templates\V2\**\*.md" CopyToOutputDirectory="PreserveNewest" LinkBase="Agents\Templates\V2" />
+  </ItemGroup>
+
 </Project>

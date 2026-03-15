@@ -35,7 +35,10 @@ public static class RepoOpsWebApp
         builder.Services.AddSingleton<SupervisorRunStore>();
         builder.Services.AddSingleton<RunVerificationService>();
         builder.Services.AddSingleton<AgentSupervisorService>();
+        builder.Services.AddSingleton<V2WorkspaceBootstrapService>();
         builder.Services.AddSingleton<V2OrchestratorService>();
+        builder.Services.AddSingleton<V3RunStore>();
+        builder.Services.AddSingleton<V3PairOrchestratorService>();
 
         var app = builder.Build();
 
@@ -561,7 +564,232 @@ public static class RepoOpsWebApp
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
+        app.MapPost("/api/v2/runs/{runId}/open-path", async (string runId, HttpRequest request, V2OrchestratorService v2) =>
+        {
+            try
+            {
+                var run = v2.GetRun(runId);
+                if (run is null)
+                {
+                    return Results.NotFound(new { error = "Run not found" });
+                }
+
+                var payload = await request.ReadFromJsonAsync<OpenPathRequest>();
+                var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot)
+                    ? run.ExecutionRoot
+                    : run.WorkspaceRoot;
+
+                if (string.IsNullOrWhiteSpace(workspaceRoot) || !Directory.Exists(workspaceRoot))
+                {
+                    return Results.BadRequest(new { error = "Workspace folder does not exist" });
+                }
+
+                if (string.IsNullOrWhiteSpace(payload?.RelativePath))
+                {
+                    return Results.BadRequest(new { error = "RelativePath is required" });
+                }
+
+                var resolvedPath = Path.GetFullPath(Path.Combine(workspaceRoot, payload.RelativePath));
+                var normalizedRoot = workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
+                    ? workspaceRoot
+                    : workspaceRoot + Path.DirectorySeparatorChar;
+                var normalizedResolved = resolvedPath.EndsWith(Path.DirectorySeparatorChar)
+                    ? resolvedPath
+                    : resolvedPath + Path.DirectorySeparatorChar;
+                if (!normalizedResolved.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(resolvedPath, workspaceRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.BadRequest(new { error = "Path must stay inside workspace root" });
+                }
+
+                var existsAsFile = File.Exists(resolvedPath);
+                var existsAsDirectory = Directory.Exists(resolvedPath);
+                if (!existsAsFile && !existsAsDirectory)
+                {
+                    return Results.NotFound(new { error = "Path does not exist", path = resolvedPath });
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    if (existsAsFile)
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            Arguments = $"/select,\"{resolvedPath}\"",
+                            UseShellExecute = true
+                        });
+                    }
+                    else
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            Arguments = $"\"{resolvedPath}\"",
+                            UseShellExecute = true
+                        });
+                    }
+                }
+                else if (OperatingSystem.IsMacOS())
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "open",
+                        Arguments = existsAsFile ? $"-R \"{resolvedPath}\"" : $"\"{resolvedPath}\"",
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "xdg-open",
+                        Arguments = existsAsDirectory ? $"\"{resolvedPath}\"" : $"\"{Path.GetDirectoryName(resolvedPath) ?? workspaceRoot}\"",
+                        UseShellExecute = true
+                    });
+                }
+
+                return Results.Ok(new { success = true, path = resolvedPath, existsAsFile, existsAsDirectory });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
         app.MapGet("/api/v2/templates", (V2OrchestratorService v2) => Results.Ok(v2.GetPromptTemplates()));
+
+        // ── V3 AI 助手 Pair-mode endpoints ──
+
+        app.MapGet("/api/v3/runs", (V3PairOrchestratorService v3) => Results.Ok(v3.GetRuns()));
+
+        app.MapGet("/api/v3/runs/{runId}", (string runId, V3PairOrchestratorService v3) =>
+        {
+            var run = v3.GetRun(runId);
+            return run is null ? Results.NotFound() : Results.Ok(run);
+        });
+
+        app.MapGet("/api/v3/runs/{runId}/snapshot", (string runId, V3PairOrchestratorService v3) =>
+        {
+            try { return Results.Ok(v3.GetRunSnapshot(runId)); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        app.MapPost("/api/v3/runs", async (HttpRequest request, V3PairOrchestratorService v3) =>
+        {
+            var payload = await request.ReadFromJsonAsync<CreateV3PairRunRequest>();
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Goal))
+            {
+                return Results.BadRequest(new { error = "Goal is required" });
+            }
+
+            try
+            {
+                return Results.Ok(await v3.CreateRunAsync(payload));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/v3/runs/{runId}/stop", async (string runId, V3PairOrchestratorService v3) =>
+        {
+            try { return Results.Ok(await v3.StopRunAsync(runId)); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        app.MapDelete("/api/v3/runs/{runId}", async (string runId, V3PairOrchestratorService v3) =>
+        {
+            try
+            {
+                await v3.DeleteRunAsync(runId);
+                return Results.Ok(new { success = true, runId });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/v3/runs/{runId}/approve-initial-plan", async (string runId, V3PairOrchestratorService v3) =>
+        {
+            try
+            {
+                return Results.Ok(await v3.ApproveInitialPlanAsync(runId));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/v3/runs/{runId}/reject-initial-plan", async (string runId, HttpRequest request, V3PairOrchestratorService v3) =>
+        {
+            var payload = await request.ReadFromJsonAsync<RejectV3InitialPlanRequest>();
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Comment))
+            {
+                return Results.BadRequest(new { error = "Comment is required" });
+            }
+
+            try
+            {
+                return Results.Ok(await v3.RejectInitialPlanAsync(runId, payload.Comment));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/v3/runs/{runId}/continue", async (string runId, HttpRequest request, V3PairOrchestratorService v3) =>
+        {
+            var payload = await request.ReadFromJsonAsync<ContinueV3PairRunRequest>() ?? new ContinueV3PairRunRequest();
+
+            if (payload.AdditionalRounds is null || payload.AdditionalRounds <= 0)
+            {
+                return Results.BadRequest(new { error = "AdditionalRounds must be a positive integer" });
+            }
+
+            try
+            {
+                return Results.Ok(await v3.ContinueRunAsync(runId, payload.Instruction, payload.AdditionalRounds.Value));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/v3/runs/{runId}/interjection", async (string runId, HttpRequest request, V3PairOrchestratorService v3) =>
+        {
+            var payload = await request.ReadFromJsonAsync<UpdateV3InterjectionRequest>();
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Text))
+            {
+                return Results.BadRequest(new { error = "Text is required" });
+            }
+
+            try
+            {
+                return Results.Ok(await v3.UpsertInterjectionAsync(runId, payload.Text, payload.UseWingman));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        app.MapDelete("/api/v3/runs/{runId}/interjection", async (string runId, V3PairOrchestratorService v3) =>
+        {
+            try
+            {
+                return Results.Ok(await v3.ClearInterjectionAsync(runId));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message);
+            }
+        });
 
         return app;
     }

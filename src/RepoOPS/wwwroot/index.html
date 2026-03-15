@@ -27,6 +27,7 @@
             <button class="workspace-tab" data-view="runs">🧠 协作运行</button>
             <button class="workspace-tab" data-view="ai-assistant">✨ AI助手</button>
             <button class="workspace-tab" data-view="ai-v2">🚀 AI助手V2</button>
+            <button class="workspace-tab" data-view="ai-v3">🪄 AI助手V3</button>
             <button class="workspace-tab" data-view="roles">🎭 角色库</button>
             <button class="workspace-tab" data-view="settings">⚙️ 调度设置</button>
         </nav>
@@ -267,8 +268,190 @@
                         </div>
                         <div class="v2-decisions-panel">
                             <div class="v2-section-header">📋 决策日志</div>
+                            <div id="v2ArtifactQuickLinks" class="v2-artifact-quick-links"></div>
                             <div id="v2DecisionLog" class="v2-decision-log"></div>
                         </div>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+        <section class="workspace-view" id="view-ai-v3">
+            <div class="main-content v3-main-content">
+                <aside class="task-panel v3-sidebar">
+                    <div class="panel-header">
+                        <h2>🪄 AI助手V3</h2>
+                    </div>
+                    <div class="workspace-sidebar-body">
+                        <div class="agent-form-card v3-form-card">
+                            <div class="agent-form-title">阶段总图 + 双拍结对助手</div>
+                            <label class="agent-label" for="v3GoalInput">总目标</label>
+                            <textarea id="v3GoalInput" class="agent-textarea" placeholder="描述你想让主线 + 子线协作完成的任务，V3 会默认用 Helm / Pathfinder 两个角色推进"></textarea>
+                            <label class="agent-label" for="v3WorkspaceInput">工作目录</label>
+                            <input id="v3WorkspaceInput" class="agent-input" type="text" placeholder="留空则使用默认工作区并自动 bootstrap">
+                            <div class="settings-grid settings-grid-2 compact-grid">
+                                <div>
+                                    <label class="agent-label" for="v3MaxRoundsInput">最大轮次</label>
+                                    <input id="v3MaxRoundsInput" class="agent-input" type="number" min="1" max="12" value="5">
+                                </div>
+                                <div>
+                                    <label class="agent-label">默认角色</label>
+                                    <div class="v3-role-pill-row">
+                                        <span class="v3-role-pill">🧠 Helm · 主线</span>
+                                        <span class="v3-role-pill">⚡ Pathfinder · 子线</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="agent-helper-text">V3 会先判断任务是否真的需要继续推进；只要目标还不能直接收口，主线就必须先给出完整整体计划，阶段数固定在 1~4 之间但由 AI 自己判断，然后再进入“双拍”推进：子线执行 → 主线复核并发下一轮任务卡。主线更像 PM / 产品负责人：负责用户、目标、范围、阶段、验收、边界和非目标；除非存在明确硬约束，否则不替子线程写死技术细节。子线则在这些约束内自主决定实现路径和 UI/UX 落地，并把主动微调如实汇报。</div>
+                            <div class="inline-actions v3-inline-actions">
+                                <button id="btnV3Start" class="editor-btn-primary" type="button">🪄 启动 V3</button>
+                                <button id="btnV3Stop" class="editor-btn-secondary" type="button" disabled>⏹ 停止</button>
+                                <button id="btnV3Delete" class="editor-btn-secondary" type="button" disabled>🗑 删除</button>
+                            </div>
+                            <div id="v3FeedbackPanel" class="agent-feedback-panel" aria-live="polite" hidden></div>
+                        </div>
+
+                        <div class="agent-list-section">
+                            <div class="agent-form-title">最近 V3 运行</div>
+                            <div id="v3RunsList" class="agent-list"></div>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="output-panel v3-detail-panel">
+                    <div class="panel-header">
+                        <h2 id="v3DetailTitle">📡 V3 调度详情</h2>
+                        <div id="v3RoundBadge" class="v3-round-badge" hidden>Round 0/0</div>
+                    </div>
+                    <div class="v3-detail-body">
+                        <section class="v3-sheet-shell v3-sheet-shell-control">
+                            <div class="v3-sheet-tabs" role="tablist" aria-label="V3 顶部面板切换">
+                                <button class="v3-sheet-tab active" type="button" data-v3-sheet-group="control" data-v3-sheet="overview">主判断轨迹</button>
+                                <button class="v3-sheet-tab" type="button" data-v3-sheet-group="control" data-v3-sheet="interjection">插话控制</button>
+                                <button class="v3-sheet-tab" type="button" data-v3-sheet-group="control" data-v3-sheet="continue">继续推进</button>
+                            </div>
+                            <div class="v3-sheet-panels">
+                                <div class="v3-sheet-panel active" data-v3-sheet-group="control" data-v3-sheet-panel="overview">
+                                    <section class="v3-overview-grid" id="v3OverviewGrid">
+                                        <div class="workspace-empty-state">启动一个 V3 run 后，这里会显示主线判断、子线任务卡、最新 verdict 和轮次轨迹。</div>
+                                    </section>
+                                </div>
+                                <div class="v3-sheet-panel" data-v3-sheet-group="control" data-v3-sheet-panel="interjection">
+                                    <section class="v3-interjection-shell">
+                                        <article class="v3-history-panel v3-interjection-panel">
+                                            <div class="v3-thread-header compact">
+                                                <div>
+                                                    <div class="v3-thread-eyebrow">Interjection</div>
+                                                    <h3>💬 插话控制</h3>
+                                                </div>
+                                            </div>
+                                            <div id="v3InterjectionPanel" class="v3-interjection-body">
+                                                <div class="workspace-empty-state">选择一个 V3 run 后，你可以在这里插话；系统会告诉你这句话会在主线的哪个位置、还要等几次 AI 交互才会生效，并允许你在生效前随时修改或删除。</div>
+                                            </div>
+                                        </article>
+                                    </section>
+                                </div>
+                                <div class="v3-sheet-panel" data-v3-sheet-group="control" data-v3-sheet-panel="continue">
+                                    <section class="v3-continue-shell">
+                                        <article class="v3-history-panel v3-continue-panel">
+                                            <div class="v3-thread-header compact">
+                                                <div>
+                                                    <div class="v3-thread-eyebrow">Continue Push</div>
+                                                    <h3>⏭ 继续推进</h3>
+                                                </div>
+                                            </div>
+                                            <div id="v3ContinuePanel" class="v3-interjection-body">
+                                                <div class="workspace-empty-state">选择一个 V3 run 后，这里会显示继续推进窗口。平时它会保持灰态，只有在软件重开恢复出 run，或 run 已完成 / 失败后，才允许基于现有事实继续工作。</div>
+                                            </div>
+                                        </article>
+                                    </section>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="v3-sheet-shell v3-sheet-shell-thread">
+                            <div class="v3-sheet-tabs" role="tablist" aria-label="V3 线程面板切换">
+                                <button class="v3-sheet-tab active" type="button" data-v3-sheet-group="thread" data-v3-sheet="main">主线</button>
+                                <button class="v3-sheet-tab" type="button" data-v3-sheet-group="thread" data-v3-sheet="sub">子线</button>
+                            </div>
+                            <div class="v3-sheet-panels">
+                                <div class="v3-sheet-panel active" data-v3-sheet-group="thread" data-v3-sheet-panel="main">
+                                    <article class="v3-thread-panel">
+                                        <div class="v3-thread-header">
+                                            <div>
+                                                <div class="v3-thread-eyebrow">Mainline</div>
+                                                <h3>🧠 主线 · Helm</h3>
+                                            </div>
+                                            <div id="v3MainStatusBadge" class="agent-badge neutral">idle</div>
+                                        </div>
+                                        <div id="v3MainCmd" class="v2-cmd-preview" hidden>
+                                            <div class="v2-cmd-preview-header" onclick="this.parentElement.classList.toggle('expanded')">
+                                                <span>▶ 主线命令</span>
+                                            </div>
+                                            <pre class="v2-cmd-preview-body"></pre>
+                                        </div>
+                                        <div id="v3MainTerminal" class="v3-terminal-output">
+                                            <div class="workspace-empty-state">主线终端会在这里显示；它负责起案、维护阶段总图、复核、拍板和给出下一轮任务卡，但不会直接改代码。</div>
+                                        </div>
+                                    </article>
+                                </div>
+                                <div class="v3-sheet-panel" data-v3-sheet-group="thread" data-v3-sheet-panel="sub">
+                                    <article class="v3-thread-panel">
+                                        <div class="v3-thread-header">
+                                            <div>
+                                                <div class="v3-thread-eyebrow">Subline</div>
+                                                <h3>⚡ 子线 · Pathfinder</h3>
+                                            </div>
+                                            <div id="v3SubStatusBadge" class="agent-badge neutral">idle</div>
+                                        </div>
+                                        <div id="v3SubCmd" class="v2-cmd-preview" hidden>
+                                            <div class="v2-cmd-preview-header" onclick="this.parentElement.classList.toggle('expanded')">
+                                                <span>▶ 子线命令</span>
+                                            </div>
+                                            <pre class="v2-cmd-preview-body"></pre>
+                                        </div>
+                                        <div id="v3SubTerminal" class="v3-terminal-output">
+                                            <div class="workspace-empty-state">子线围绕主线任务卡与当前阶段目标推进；终端在这里持续显示执行、验证和本轮主动微调过程。</div>
+                                        </div>
+                                    </article>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="v3-sheet-shell v3-sheet-shell-history">
+                            <div class="v3-sheet-tabs" role="tablist" aria-label="V3 历史面板切换">
+                                <button class="v3-sheet-tab active" type="button" data-v3-sheet-group="history" data-v3-sheet="timeline">轮次轨迹</button>
+                                <button class="v3-sheet-tab" type="button" data-v3-sheet-group="history" data-v3-sheet="decisions">主线决策</button>
+                            </div>
+                            <div class="v3-sheet-panels">
+                                <div class="v3-sheet-panel active" data-v3-sheet-group="history" data-v3-sheet-panel="timeline">
+                                    <article class="v3-history-panel">
+                                        <div class="v3-thread-header compact">
+                                            <div>
+                                                <div class="v3-thread-eyebrow">Round Feed</div>
+                                                <h3>📚 轮次轨迹</h3>
+                                            </div>
+                                        </div>
+                                        <div id="v3Timeline" class="v3-timeline">
+                                            <div class="workspace-empty-state">还没有轮次记录。</div>
+                                        </div>
+                                    </article>
+                                </div>
+                                <div class="v3-sheet-panel" data-v3-sheet-group="history" data-v3-sheet-panel="decisions">
+                                    <article class="v3-history-panel v3-decision-panel">
+                                        <div class="v3-thread-header compact">
+                                            <div>
+                                                <div class="v3-thread-eyebrow">Decisions</div>
+                                                <h3>🧾 主线决策</h3>
+                                            </div>
+                                        </div>
+                                        <div id="v3DecisionLog" class="v3-decision-log">
+                                            <div class="workspace-empty-state">等待主线给出第一条判定、保留/修正决定，以及下一轮任务卡。</div>
+                                        </div>
+                                    </article>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 </main>
             </div>
@@ -332,6 +515,7 @@
     <script src="js/agent-console/roles.js"></script>
     <script src="js/agent-console/settings.js"></script>
     <script src="js/agent-console/ai-v2.js"></script>
+    <script src="js/agent-console/ai-v3.js"></script>
     <script src="js/agent-console/boot.js"></script>
 </body>
 </html>

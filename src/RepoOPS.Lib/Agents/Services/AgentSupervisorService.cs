@@ -19,15 +19,43 @@ public sealed partial class AgentSupervisorService(
     IHubContext<TaskHub> hubContext,
     ILogger<AgentSupervisorService> logger)
 {
+    private static readonly Regex WorkspaceNameRegex = new("^[a-z]{5,}$", RegexOptions.Compiled);
+    private static readonly Regex AsciiTokenRegex = new("[a-z]+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private const string AgentsLaneId = "lane_agents";
     private const string ControlLaneId = "lane_control";
     private const string VerificationLaneId = "lane_verification";
     private const string CoordinatorSurfaceId = "surface:coordinator";
     private const string VerificationSurfaceId = "surface:verification";
     private const string PromptArgumentToken = "__REPOOPS_PROMPT__";
+    private const string NamingModel = "gpt-5-mini";
     private static readonly Regex QuotedWindowsPathRegex = new("(?<quote>[\"'])(?<path>[A-Za-z]:\\\\[^\"'\\r\\n]+)\\k<quote>", RegexOptions.Compiled);
     private static readonly Regex BareWindowsPathRegex = new(@"(?<![\w/])(?<path>[A-Za-z]:\\[^\s""'<>|]+)", RegexOptions.Compiled);
     private static readonly Regex RelativePathRegex = new(@"(?<![\w/])(?<path>\.{1,2}[\\/][^\s""'<>|]+)", RegexOptions.Compiled);
+    private static readonly HashSet<string> WorkspaceNameStopWords =
+    [
+        "a", "an", "the", "to", "for", "in", "on", "at", "by", "of", "and", "or", "is", "are", "be", "with",
+        "this", "that", "it", "from", "as", "into", "your", "my", "our", "you", "me", "we", "i"
+    ];
+    private static readonly IReadOnlyDictionary<string, string> GoalKeywordMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["简单"] = "simple",
+        ["任务"] = "task",
+        ["子进程"] = "workers",
+        ["并行"] = "parallel",
+        ["免费模型"] = "freemodel",
+        ["模型"] = "model",
+        ["角色"] = "role",
+        ["名字"] = "name",
+        ["目录"] = "dir",
+        ["文件"] = "file",
+        ["文档"] = "docs",
+        ["配置"] = "config",
+        ["测试"] = "test",
+        ["构建"] = "build",
+        ["修复"] = "fix",
+        ["优化"] = "optimize",
+        ["部署"] = "deploy"
+    };
 
     private readonly AgentRoleConfigService _roleConfigService = roleConfigService;
     private readonly AssistantPlanStore _assistantPlanStore = assistantPlanStore;
@@ -565,6 +593,197 @@ public sealed partial class AgentSupervisorService(
         return trimmed.Length <= 48 ? trimmed : trimmed[..48] + "…";
     }
 
+    private static string? TryNormalizeWorkspaceNameCandidate(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var candidate = raw.Trim().ToLowerInvariant();
+        candidate = candidate
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal);
+
+        var filtered = new string(candidate.Where(char.IsAsciiLetter).ToArray());
+
+        if (filtered.Length < 5)
+        {
+            return null;
+        }
+
+        return WorkspaceNameRegex.IsMatch(filtered) ? filtered : null;
+    }
+
+    private static string BuildAiStyleWorkspaceName(string source, string goal)
+    {
+        var tokens = new List<string>();
+        var lowered = (source ?? string.Empty).Trim().ToLowerInvariant();
+        var fallbackContext = string.IsNullOrWhiteSpace(goal) ? source : goal;
+
+        foreach (var kvp in GoalKeywordMap)
+        {
+            if (lowered.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                tokens.Add(kvp.Value);
+            }
+        }
+
+        foreach (Match match in AsciiTokenRegex.Matches(lowered))
+        {
+            var token = match.Value.Trim();
+            if (token.Length >= 2 && !WorkspaceNameStopWords.Contains(token))
+            {
+                tokens.Add(token);
+            }
+
+            if (tokens.Count >= 12)
+            {
+                break;
+            }
+        }
+
+        var normalizedTokens = tokens
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
+
+        var suffix = CreateStableSuffix(fallbackContext ?? string.Empty);
+        if (normalizedTokens.Count == 0)
+        {
+            return $"task{suffix}";
+        }
+
+        var compact = string.Concat(normalizedTokens.Select(token => ShrinkWorkspaceNameToken(token, 12)));
+        if (compact.Length < 5)
+        {
+            compact += suffix;
+        }
+
+        if (compact.Length < 5)
+        {
+            compact = $"task{suffix}";
+        }
+
+        return compact;
+    }
+
+    private static string ShrinkWorkspaceNameToken(string token, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = new string(token.ToLowerInvariant().Where(char.IsAsciiLetter).ToArray());
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            return string.Empty;
+        }
+
+        return cleaned.Length <= maxLength ? cleaned : cleaned[..maxLength];
+    }
+
+    private static string? ExtractWorkspaceNameCandidate(string? rawOutput)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+        {
+            return null;
+        }
+
+        var contentOnly = rawOutput;
+        var usageIndex = contentOnly.IndexOf("Total usage est:", StringComparison.OrdinalIgnoreCase);
+        if (usageIndex >= 0)
+        {
+            contentOnly = contentOnly[..usageIndex];
+        }
+
+        var lines = contentOnly
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+
+        foreach (var line in lines)
+        {
+            if (line.Contains("\\", StringComparison.Ordinal) || line.Contains(':', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var trimmed = line.Trim('`', '\'', '"');
+            if (!Regex.IsMatch(trimmed, "^[a-zA-Z][a-zA-Z_-]{4,}$", RegexOptions.CultureInvariant))
+            {
+                continue;
+            }
+
+            var normalized = TryNormalizeWorkspaceNameCandidate(trimmed);
+            if (!string.IsNullOrWhiteSpace(normalized) && WorkspaceNameRegex.IsMatch(normalized))
+            {
+                return normalized;
+            }
+        }
+
+        return null;
+    }
+
+    private static string BuildWorkspaceName(string goal, string? requestedWorkspaceName)
+    {
+        var explicitName = TryNormalizeWorkspaceNameCandidate(requestedWorkspaceName);
+        if (!string.IsNullOrWhiteSpace(explicitName))
+        {
+            return explicitName;
+        }
+
+        return BuildAiStyleWorkspaceName(string.IsNullOrWhiteSpace(requestedWorkspaceName) ? goal : requestedWorkspaceName!, goal);
+    }
+
+    private static string NormalizeWorkspaceName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var lowered = value.Trim().ToLowerInvariant();
+        var sb = new StringBuilder();
+        var lastWasDash = false;
+
+        foreach (var ch in lowered)
+        {
+            if (char.IsAsciiLetterOrDigit(ch))
+            {
+                sb.Append(ch);
+                lastWasDash = false;
+                continue;
+            }
+
+            if (sb.Length == 0 || lastWasDash)
+            {
+                continue;
+            }
+
+            sb.Append('-');
+            lastWasDash = true;
+        }
+
+        var sanitized = sb.ToString().Trim('-');
+        if (sanitized.Length > 24)
+        {
+            sanitized = sanitized[..24].Trim('-');
+        }
+
+        if (!string.IsNullOrWhiteSpace(sanitized))
+        {
+            return sanitized;
+        }
+
+        var fallback = $"task-{CreateStableSuffix(lowered)}";
+        return fallback.Length > 24 ? fallback[..24].Trim('-') : fallback;
+    }
+
     private static SupervisorPlan? TryParsePlan(string rawOutput, SupervisorRun? run = null)
     {
         if (string.IsNullOrWhiteSpace(rawOutput))
@@ -847,67 +1066,6 @@ public sealed partial class AgentSupervisorService(
         return candidate;
     }
 
-    private static string BuildWorkspaceName(string goal, string? requestedWorkspaceName)
-    {
-        var explicitName = NormalizeWorkspaceName(requestedWorkspaceName);
-        if (!string.IsNullOrWhiteSpace(explicitName))
-        {
-            return explicitName;
-        }
-
-        var keywordName = NormalizeWorkspaceName(goal);
-        if (!string.IsNullOrWhiteSpace(keywordName))
-        {
-            return keywordName;
-        }
-
-        return $"task-{CreateStableSuffix(goal)}";
-    }
-
-    private static string NormalizeWorkspaceName(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var lowered = value.Trim().ToLowerInvariant();
-        var sb = new StringBuilder();
-        var lastWasDash = false;
-
-        foreach (var ch in lowered)
-        {
-            if (char.IsAsciiLetterOrDigit(ch))
-            {
-                sb.Append(ch);
-                lastWasDash = false;
-                continue;
-            }
-
-            if (sb.Length == 0 || lastWasDash)
-            {
-                continue;
-            }
-
-            sb.Append('-');
-            lastWasDash = true;
-        }
-
-        var sanitized = sb.ToString().Trim('-');
-        if (sanitized.Length > 24)
-        {
-            sanitized = sanitized[..24].Trim('-');
-        }
-
-        if (!string.IsNullOrWhiteSpace(sanitized))
-        {
-            return sanitized;
-        }
-
-        var fallback = $"task-{CreateStableSuffix(lowered)}";
-        return fallback.Length > 24 ? fallback[..24].Trim('-') : fallback;
-    }
-
     private static string CreateStableSuffix(string value)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value ?? string.Empty));
@@ -1180,7 +1338,7 @@ public sealed partial class AgentSupervisorService(
 
     private static string GetDefaultCopilotInstructionsContent()
     {
-        return "# Workspace Rules\r\n\r\n## Scope\r\n- Work only inside the current workspace root unless the user explicitly expands it.\r\n- If the user explicitly mentions a directory or file path that exists outside the current workspace root, RepoOPS may grant runtime access to that location by appending `--add-dir` for the resolved directory. Do not assume access to unstated external paths.\r\n- When an external directory is needed for ongoing work, keep the `.code-workspace` file aligned when practical, or ask the user to bring the needed files into the workspace.\r\n- Keep notes and prompts concise.\r\n\r\n## 变更日志规范\r\n- 根据自己 agent 的名字创建日志文件，例如 `开发1-变更日志.md`、`开发2-变更日志.md`。\r\n- 仅追加，不删改历史。新日志追加到文末。\r\n- 格式固定：\r\n\r\n```\r\n## YYYY-MM-DD HH:mm:ss\r\n\r\n### 实现目标\r\n- （变更 / 修复 / 优化目标）\r\n\r\n### 变更内容\r\n- （改动点）\r\n\r\n### 验证结果（可选）\r\n\r\n### 后续计划（可选）\r\n```\r\n\r\n## 关键事项补充\r\n- 允许追加新的简短章节，并注明 `added by <agent-name>`。\r\n";
+        return "# Copilot 仓库说明\r\n\r\n## Scope\r\n- 仅在当前 workspace root 内工作；除非用户明确扩展范围，不要假设可以访问外部目录。\r\n- 若用户明确提到当前 workspace 外的真实目录或文件，RepoOPS 可能在运行时附加访问；在此之前不要自行假设有权限。\r\n- 外部目录若需要持续参与开发，优先保持 `.code-workspace` 与实际访问范围一致。\r\n\r\n## 默认执行原则\r\n- 环境问题优先：若缺 SDK、依赖、命令、包管理源或必要工具会阻断编码，应优先补齐环境，再继续业务开发；不要把环境问题拖到很多轮之后。\r\n- 连续编码阶段不做 UI 视觉验收：不要浪费时间做截图判读、录屏比对、像素级 UI 测试或主观界面评价。自动化验证默认只做 smoke、构建、探针和行为级检查，不做界面视觉判断。UI 只按设计实现，视觉效果留给后续人工阶段确认。\r\n- 中文优先：所有面向人的 UI 文案、仓库文档、说明、计划、总结、日志默认使用中文；英文只保留在代码符号、命令、协议字段、库名或必要原文中。\r\n- 规则尽量够用即可：优先最小可执行约束，不要堆过多口号式要求。\r\n\r\n## Skill 原则\r\n- 如果发现某类经验很重要、未来容易反复犯错，而且具有项目长期价值，可以自行沉淀为项目内 skill。\r\n- 优先放在 `.github/skills/<skill-name>/SKILL.md`，内容保持短小、聚焦、可复用。\r\n- 只有当经验确实会反复用到时再新增，不要把一次性问题也写成 skill。\r\n\r\n## 变更日志规范\r\n- 各线程/角色在项目根目录维护自己的 `角色-变更日志.md`，例如 `Helm-变更日志.md`、`Pathfinder-变更日志.md`。\r\n- 尽量简单记录当前轮次做的事情，不写过多细节，只说大面。\r\n- 仅追加，不删改历史。新日志追加到文末。\r\n- 格式固定：\r\n\r\n```\r\n## 轮次 角色xxx\r\n\r\n### 实现目标\r\n- （变更 / 修复 / 优化目标）\r\n\r\n### 变更内容\r\n- （改动点）\r\n\r\n### 验证结果（可选）\r\n\r\n### 后续计划（可选）\r\n```\r\n";
     }
 
     private static void WriteWorkspaceMetadata(string workspacePath, string workspaceName, string goal, string executionRoot, IReadOnlyCollection<string>? additionalDirectories)

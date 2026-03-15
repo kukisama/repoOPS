@@ -14,6 +14,13 @@ public sealed class V2Run
     public string? WorkspaceRoot { get; set; }
     public string? ExecutionRoot { get; set; }
     public List<string> AdditionalAllowedDirectories { get; set; } = [];
+    public string? WorkspaceMetadataFile { get; set; }
+    public string? AllowedPathsFile { get; set; }
+    public string? AllowedToolsFile { get; set; }
+    public string? AllowedUrlsFile { get; set; }
+    public string? RelatedPreviousRunId { get; set; }
+    public string? RelatedPreviousRunSummaryPath { get; set; }
+    public double? RelatedPreviousRunScore { get; set; }
 
     /// <summary>Main thread PTY session id (if running).</summary>
     public string? MainThreadSessionId { get; set; }
@@ -46,8 +53,10 @@ public sealed class V2Worker
     public string? ResultMarkdown { get; set; }
     public string? LastOutputPreview { get; set; }
     public string? PtySessionId { get; set; }
+    public string? OutputFilePath { get; set; }
     public string? CommandPreview { get; set; }
     public int? ExitCode { get; set; }
+    public V2UsageStats? UsageStats { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -90,6 +99,7 @@ public sealed class CreateV2RunRequest
     public string Goal { get; set; } = string.Empty;
     public string? Title { get; set; }
     public string? WorkspaceRoot { get; set; }
+    public string? WorkspaceName { get; set; }
     public int MaxRounds { get; set; } = 6;
     public bool AutoStart { get; set; } = true;
 }
@@ -100,4 +110,28 @@ public sealed class V2RunSnapshot
     public List<V2Worker> Workers { get; set; } = [];
     public List<V2RoundRecord> Rounds { get; set; } = [];
     public List<V2Decision> Decisions { get; set; } = [];
+}
+
+public sealed class OpenPathRequest
+{
+    public string RelativePath { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Parsed copilot CLI usage statistics from the "Total usage est:" block.
+/// </summary>
+public sealed class V2UsageStats
+{
+    public string? TotalUsage { get; set; }
+    public string? ApiTime { get; set; }
+    public string? SessionTime { get; set; }
+    public string? CodeChanges { get; set; }
+    public List<V2ModelUsage> ModelBreakdown { get; set; } = [];
+    public string? RawBlock { get; set; }
+}
+
+public sealed class V2ModelUsage
+{
+    public string Model { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
 }

@@ -188,6 +188,13 @@ public sealed class PtyService(
         state.Session.Resize(c, r);
     }
 
+    public string? GetTranscriptPath(string sessionId)
+    {
+        return _sessions.TryGetValue(sessionId, out var state)
+            ? state.TranscriptPath
+            : null;
+    }
+
     public void StopSession(string sessionId)
     {
         if (!_sessions.TryRemove(sessionId, out var state)) return;

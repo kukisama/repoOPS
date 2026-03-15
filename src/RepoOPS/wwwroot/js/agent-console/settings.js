@@ -140,7 +140,7 @@
                             <label class="agent-checkbox-row"><input name="allowWorkerPermissionRequests" type="checkbox" ${(settings.allowWorkerPermissionRequests ?? true) ? 'checked' : ''}> <span>执行时不强制禁用权限申请（仅外层环境支持交互审批时有效）</span></label>
                             <label class="agent-checkbox-row"><input name="enableYoloMode" type="checkbox" ${settings.enableYoloMode ? 'checked' : ''}> <span>⚠️ YOLO 模式（<code>--yolo</code>：一键开启全部权限，跳过所有工具/路径/URL 确认）</span></label>
                         </div>
-                        <div class="agent-helper-text">注意：这不是 RepoOPS 自己的弹窗开关。当前通过后台 <code>gh</code> 子进程执行时，RepoOPS 本身没有内置授权弹窗；这里仅表示是否追加 <code>--no-ask-user</code>。只有外层运行环境本身支持交互审批时，才可能真的出现确认流程，否则仍会报"无法申请权限"。<br>YOLO 模式开启后，会追加 <code>--yolo</code> 代替上述所有单独权限标志，copilot 将跳过一切工具/文件/网络权限确认。<strong>仅建议在受信环境下测试时使用。</strong></div>
+                        <div class="agent-helper-text">注意：这不是 RepoOPS 自己的弹窗开关。当前通过后台 <code>copilot</code> 子进程执行时，RepoOPS 本身没有内置授权弹窗；这里仅表示是否追加 <code>--no-ask-user</code>。只有外层运行环境本身支持交互审批时，才可能真的出现确认流程，否则仍会报"无法申请权限"。<br>YOLO 模式开启后，会追加 <code>--yolo</code> 代替上述所有单独权限标志，copilot 将跳过一切工具/文件/网络权限确认。<strong>仅建议在受信环境下测试时使用。</strong></div>
                     </div>
                 `;
             case 'models':
@@ -178,7 +178,7 @@
                         <div class="section-title-row"><h3>工作区与环境</h3></div>
                         <label class="agent-label">默认仓库根目录</label>
                         <input class="agent-input" name="defaultWorkspaceRoot" type="text" value="${AgentConsole.utils.escapeHtml(settings.defaultWorkspaceRoot || '')}" placeholder="留空表示当前仓库根（.）；填写后作为默认执行根目录">
-                        <div class="agent-helper-text">这里是 Run 的仓库根 / 执行根。留空就按当前仓库根 <code>.</code> 处理；后续 worker 和 coordinator 的 <code>gh</code> 都会从这个根目录启动，所有相对路径也都相对于这里计算。</div>
+                        <div class="agent-helper-text">这里是 Run 的仓库根 / 执行根。留空就按当前仓库根 <code>.</code> 处理；后续 worker 和 coordinator 的 <code>copilot</code> 都会从这个根目录启动，所有相对路径也都相对于这里计算。</div>
                         <label class="agent-label">全局环境变量（KEY=VALUE）</label>
                         <textarea class="agent-textarea agent-textarea-lg textarea-code" name="environmentVariables" placeholder="例如\nGH_DEBUG=api\nDOTNET_CLI_TELEMETRY_OPTOUT=1">${AgentConsole.utils.escapeHtml(AgentConsole.utils.dictionaryToLines(settings.environmentVariables))}</textarea>
                     </div>

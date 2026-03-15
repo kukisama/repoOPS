@@ -18,6 +18,11 @@
             body: JSON.stringify(payload)
         }).then(r => r.json()),
         stopRun: (id) => fetch(`/api/v2/runs/${encodeURIComponent(id)}/stop`, { method: 'POST' }).then(r => r.json()),
+        openPath: (id, relativePath) => fetch(`/api/v2/runs/${encodeURIComponent(id)}/open-path`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relativePath })
+        }).then(r => r.json()),
         getTemplates: () => fetch('/api/v2/templates').then(r => r.json())
     };
 
@@ -231,13 +236,13 @@
 
             updateMainThreadIndicator('running');
 
-            const preview = `${commandLine}\nSet-Location -LiteralPath ${quotePowerShellLiteral(workingDirectory)}\ngh copilot`;
+            const preview = `${commandLine}\nSet-Location -LiteralPath ${quotePowerShellLiteral(workingDirectory)}\ncopilot`;
             showCmdPreview('v2MainThreadCmd', preview);
 
-            const inputScript = `Set-Location -LiteralPath ${quotePowerShellLiteral(workingDirectory)}\r\ngh copilot\r\n`;
+            const inputScript = `Set-Location -LiteralPath ${quotePowerShellLiteral(workingDirectory)}\r\ncopilot\r\n`;
             await v2PtyConn.invoke('SendPtyInput', sessionId, inputScript);
 
-            showFeedback('已在主窗体启动测试：gh copilot（可直接在终端交互）。', 'info');
+            showFeedback('已在主窗体启动测试：copilot（可直接在终端交互）。', 'info');
         } catch (e) {
             showFeedback(e?.message || '启动测试失败', 'error');
         } finally {
@@ -373,6 +378,7 @@
 
         // Only render worker TABS (not terminal content — that's managed by xterm)
         renderWorkerTabs(snapshot.workers || []);
+        renderArtifactQuickLinks(run);
         renderDecisions(snapshot.decisions || []);
     }
 
@@ -381,7 +387,50 @@
         if (badge) badge.hidden = true;
         clearTerminalContainers();
         document.getElementById('v2WorkerTabs').innerHTML = '';
+        document.getElementById('v2ArtifactQuickLinks').innerHTML = '';
         document.getElementById('v2DecisionLog').innerHTML = '';
+    }
+
+    function roundArtifactBasePath(run) {
+        const round = String(Math.max(1, run?.currentRound || 1)).padStart(3, '0');
+        return `.repoops/v2/runs/${run.runId}/rounds/round-${round}`;
+    }
+
+    function renderArtifactQuickLinks(run) {
+        const container = document.getElementById('v2ArtifactQuickLinks');
+        if (!container) return;
+        if (!run || !run.runId) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const base = roundArtifactBasePath(run);
+        const links = [
+            { label: '📘 本轮计划', path: `${base}/main-plan.json` },
+            { label: '🔍 本轮评审', path: `${base}/review.json` },
+            { label: '👥 Worker产物', path: `${base}/workers` }
+        ];
+
+        container.innerHTML = links.map(item =>
+            `<button class="editor-btn-secondary" type="button" data-artifact-path="${escapeHtml(item.path)}" title="打开 ${escapeHtml(item.path)}">${item.label}</button>`
+        ).join('');
+
+        container.querySelectorAll('[data-artifact-path]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const relativePath = btn.getAttribute('data-artifact-path');
+                if (!relativePath || !selectedV2RunId) return;
+                try {
+                    const result = await v2Api.openPath(selectedV2RunId, relativePath);
+                    if (result?.error) {
+                        showFeedback(result.error, 'error');
+                        return;
+                    }
+                    showFeedback(`已打开：${relativePath}`, 'success');
+                } catch (e) {
+                    showFeedback(e?.message || '打开产物失败', 'error');
+                }
+            });
+        });
     }
 
     function clearTerminalContainers() {

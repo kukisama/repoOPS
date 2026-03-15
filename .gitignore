@@ -12,3 +12,9 @@ docs/
 # 构建时生成的压缩文件
 *.br
 *.gz
+.repoops/
+GitHub Copilot-变更日志.md
+项目对比.md
+copilot-instructions.md
+.github/copilot-instructions.md
+skills/

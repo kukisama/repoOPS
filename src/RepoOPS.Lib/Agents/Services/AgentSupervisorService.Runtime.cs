@@ -25,8 +25,11 @@ public sealed partial class AgentSupervisorService
 
         var goal = request.Goal.Trim();
         var executionRoot = ResolveExecutionRoot(settings, request.WorkspaceRoot);
+        var resolvedWorkspaceName = string.IsNullOrWhiteSpace(request.WorkspaceRoot)
+            ? await ResolveWorkspaceNameAsync(goal, request.WorkspaceName, executionRoot)
+            : request.WorkspaceName;
         var workspaceBootstrap = string.IsNullOrWhiteSpace(request.WorkspaceRoot)
-            ? InitializeTaskWorkspace(executionRoot, goal, request.WorkspaceName)
+            ? InitializeTaskWorkspace(executionRoot, goal, resolvedWorkspaceName)
             : UseManualWorkspace(executionRoot);
         var additionalDirectories = ExtractReferencedDirectories([goal], workspaceBootstrap.ExecutionRoot, workspaceBootstrap.WorkspacePath);
         var run = new SupervisorRun
@@ -124,7 +127,7 @@ public sealed partial class AgentSupervisorService
         }
 
         proposal ??= BuildFallbackRoleProposal(tempRun.Goal, catalog.Roles);
-        proposal.RecommendedWorkspaceName = BuildWorkspaceName(tempRun.Goal, proposal.RecommendedWorkspaceName);
+        proposal.RecommendedWorkspaceName = await ResolveWorkspaceNameAsync(tempRun.Goal, proposal.RecommendedWorkspaceName, executionRoot);
         proposal.ExistingRoles = proposal.ExistingRoles
             .Where(item => catalog.Roles.Any(role => string.Equals(role.RoleId, item.RoleId, StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -755,79 +758,33 @@ public sealed partial class AgentSupervisorService
             effectiveModel = "gpt-5.4";
         }
 
-        var ghArguments = new List<string>
+        var copilotArguments = new List<string>
         {
-            "copilot",
-            "--",
             "-p",
             PromptArgumentToken,
-            "-s"
+            "--yolo"
         };
 
-        if (!settings.AllowWorkerPermissionRequests)
-        {
-            ghArguments.Add("--no-ask-user");
-        }
+        copilotArguments.Add($"--resume={worker.SessionId}");
+        copilotArguments.Add("--model");
+        copilotArguments.Add(effectiveModel);
 
-        ghArguments.Add($"--resume={worker.SessionId}");
-        ghArguments.Add("--model");
-        ghArguments.Add(effectiveModel);
+        copilotArguments.Add("--add-dir");
+        copilotArguments.Add(workspaceRoot);
 
-        if (role.AllowAllTools)
+        foreach (var directory in NormalizeList(run.AdditionalAllowedDirectories))
         {
-            ghArguments.Add("--allow-all-tools");
-        }
-        else
-        {
-            foreach (var tool in NormalizeList(role.AllowedTools))
-            {
-                ghArguments.Add("--allow-tool");
-                ghArguments.Add(tool);
-            }
-        }
-
-        if (role.AllowAllPaths)
-        {
-            ghArguments.Add("--allow-all-paths");
-        }
-        else
-        {
-            ghArguments.Add("--add-dir");
-            ghArguments.Add(workspaceRoot);
-
-            foreach (var directory in NormalizeList(run.AdditionalAllowedDirectories))
-            {
-                ghArguments.Add("--add-dir");
-                ghArguments.Add(directory);
-            }
-
-            foreach (var path in NormalizeList(role.AllowedPaths))
-            {
-                ghArguments.Add("--add-dir");
-                ghArguments.Add(ResolveAllowedPath(run.WorkspaceRoot ?? workspaceRoot, path));
-            }
-        }
-
-        if (role.AllowAllUrls)
-        {
-            ghArguments.Add("--allow-all-urls");
-        }
-        else
-        {
-            foreach (var url in NormalizeList(role.AllowedUrls))
-            {
-                ghArguments.Add("--allow-url");
-                ghArguments.Add(url);
-            }
+            copilotArguments.Add("--add-dir");
+            copilotArguments.Add(directory);
         }
 
         foreach (var tool in NormalizeList(role.DeniedTools))
         {
-            ghArguments.Add("--deny-tool");
-            ghArguments.Add(tool);
+            copilotArguments.Add("--deny-tool");
+            copilotArguments.Add(tool);
         }
 
-        var commandPreview = BuildPromptFileReplayCommand(workspaceRoot, promptArtifact.PromptPath, "gh", ghArguments);
+        var commandPreview = BuildPromptFileReplayCommand(workspaceRoot, promptArtifact.PromptPath, "copilot", copilotArguments);
         var startInfo = CreatePowerShellStartInfo(workspaceRoot, commandPreview);
 
         foreach (var kvp in settings.EnvironmentVariables ?? [])
@@ -849,41 +806,34 @@ public sealed partial class AgentSupervisorService
         return new CopilotLaunchPlan(startInfo, commandPreview);
     }
 
-    private async Task<OneShotResult> ExecuteOneShotAsync(string prompt, SupervisorRun run, string liveTitle)
+    private async Task<OneShotResult> ExecuteOneShotAsync(string prompt, SupervisorRun run, string liveTitle, string? modelOverride = null)
     {
         var catalog = _roleConfigService.Load();
         var settings = catalog.Settings ?? new SupervisorSettings();
-        var supervisorModel = string.IsNullOrWhiteSpace(settings.SupervisorModel) ? "gpt-5.4" : settings.SupervisorModel;
+        var supervisorModel = string.IsNullOrWhiteSpace(modelOverride)
+            ? string.IsNullOrWhiteSpace(settings.SupervisorModel) ? "gpt-5.4" : settings.SupervisorModel
+            : modelOverride.Trim();
         var workspaceRoot = string.IsNullOrWhiteSpace(run.WorkspaceRoot) ? FindWorkspaceRoot(settings) : run.WorkspaceRoot!;
         MergeAdditionalAllowedDirectories(run, workspaceRoot, prompt);
         var promptArtifact = CreateSupervisorPromptArtifact(run, workspaceRoot, liveTitle, prompt);
-        var ghArguments = new List<string>
+        var copilotArguments = new List<string>
         {
-            "copilot",
-            "--",
             "-p",
             PromptArgumentToken,
-            "-s"
+            "--yolo"
         };
 
-        if (!settings.AllowWorkerPermissionRequests)
-        {
-            ghArguments.Add("--no-ask-user");
-        }
-
-        ghArguments.Add("--allow-all-tools");
-        ghArguments.Add("--disable-parallel-tools-execution");
-        ghArguments.Add("--add-dir");
-        ghArguments.Add(workspaceRoot);
+        copilotArguments.Add("--add-dir");
+        copilotArguments.Add(workspaceRoot);
         foreach (var directory in NormalizeList(run.AdditionalAllowedDirectories))
         {
-            ghArguments.Add("--add-dir");
-            ghArguments.Add(directory);
+            copilotArguments.Add("--add-dir");
+            copilotArguments.Add(directory);
         }
-        ghArguments.Add("--model");
-        ghArguments.Add(supervisorModel);
+        copilotArguments.Add("--model");
+        copilotArguments.Add(supervisorModel);
 
-        var commandPreview = BuildPromptFileReplayCommand(workspaceRoot, promptArtifact.PromptPath, "gh", ghArguments);
+        var commandPreview = BuildPromptFileReplayCommand(workspaceRoot, promptArtifact.PromptPath, "copilot", copilotArguments);
         var startInfo = CreatePowerShellStartInfo(workspaceRoot, commandPreview);
 
         foreach (var kvp in settings.EnvironmentVariables ?? [])
@@ -936,6 +886,56 @@ public sealed partial class AgentSupervisorService
                 ? "Supervisor did not return a recommendation."
                 : output,
             commandPreview);
+    }
+
+    private async Task<string> ResolveWorkspaceNameAsync(string goal, string? requestedWorkspaceName, string executionRoot)
+    {
+        var explicitName = TryNormalizeWorkspaceNameCandidate(requestedWorkspaceName);
+        if (!string.IsNullOrWhiteSpace(explicitName))
+        {
+            return explicitName;
+        }
+
+        try
+        {
+            var namingRun = new SupervisorRun
+            {
+                RunId = Guid.NewGuid().ToString("N"),
+                Title = CreateTitleFromGoal(goal),
+                Goal = goal,
+                ExecutionRoot = executionRoot,
+                WorkspaceRoot = executionRoot,
+                WorkspaceName = string.Empty,
+                Workers = []
+            };
+
+            var prompt = string.Join("\n", new[]
+            {
+                "You generate one project directory name from a user goal.",
+                "Rules:",
+                "- Output exactly one name and nothing else.",
+                "- Use lowercase English letters only.",
+                "- Use 2-3 words but concatenate them directly (no '-', no '_', no spaces).",
+                "- Minimum length is 5 letters. No maximum length limit.",
+                "- Do not call tools. Do not access files. Do not write any extra text.",
+                $"Goal: {goal}"
+            });
+
+            var result = await ExecuteOneShotAsync(prompt, namingRun, "AI Workspace Naming", NamingModel);
+            var candidate = ExtractWorkspaceNameCandidate(result.Output);
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+
+            _logger.LogWarning("AI workspace naming returned invalid candidate for goal '{Goal}': {Output}", goal, TrimOutput(result.Output));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI workspace naming failed for goal '{Goal}', falling back to local V2-style naming.", goal);
+        }
+
+        return BuildWorkspaceName(goal, requestedWorkspaceName);
     }
 
     private static async Task PumpOneShotStreamAsync(StreamReader reader, StringBuilder buffer, Func<string, Task> onChunk)
@@ -1150,12 +1150,12 @@ public sealed partial class AgentSupervisorService
             sb.AppendLine($"- roleId={role.RoleId}; name={role.Name}; description={role.Description}; workspacePath={role.WorkspacePath}");
         }
 
-        sb.AppendLine("要求：优先复用现有角色；优先让执行角色在各自流程里自行构建、运行、测试；只有在项目确实需要统一兜底时，才建议新增专门的构建/检查角色；不要为了“验证”而机械新增一个空泛角色。新角色最多 3 个。summary 和 reason 可以用中文；roleId 必须是简短英文 kebab-case。recommendedWorkspaceName 保持 24 个字符以内。\n");
+        sb.AppendLine("要求：优先复用现有角色；优先让执行角色在各自流程里自行构建、运行、测试；只有在项目确实需要统一兜底时，才建议新增专门的构建/检查角色；不要为了“验证”而机械新增一个空泛角色。新角色最多 3 个。summary 和 reason 可以用中文；roleId 必须是简短英文 kebab-case。recommendedWorkspaceName 必须是仅包含小写英文字母的短名字，建议 2-3 个英文词直接连写，不要带空格、短横线、下划线，且至少 5 个字母。\n");
         sb.AppendLine("要求：如果用户问题里显式提到某个现存目录或文件路径，RepoOPS 可能会把对应目录作为 `--add-dir` 传给 CLI；除此之外，请仍然把未明确授权的外部路径视为不可访问。\n");
         sb.AppendLine("JSON schema:");
         sb.AppendLine("{");
         sb.AppendLine("  \"summary\": \"简短说明为什么这么分工\",");
-        sb.AppendLine("  \"recommendedWorkspaceName\": \"short-english-name\",");
+        sb.AppendLine("  \"recommendedWorkspaceName\": \"shortenglishname\",");
         sb.AppendLine("  \"existingRoles\": [");
         sb.AppendLine("    { \"roleId\": \"planner\", \"reason\": \"为什么复用它\", \"selected\": true }");
         sb.AppendLine("  ],");
