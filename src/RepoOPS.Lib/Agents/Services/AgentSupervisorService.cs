@@ -1164,12 +1164,19 @@ public sealed partial class AgentSupervisorService(
         var githubDir = Path.Combine(workspacePath, ".github");
         var instructionsPath = Path.Combine(githubDir, "copilot-instructions.md");
         var legacyInstructionsPath = Path.Combine(workspacePath, "copilot-instructions.md");
+        var legacyNestedInstructionsPath = Path.Combine(githubDir, "copilot", "copilot-instructions.md");
 
         Directory.CreateDirectory(githubDir);
 
         if (!File.Exists(instructionsPath) && File.Exists(legacyInstructionsPath))
         {
             File.Move(legacyInstructionsPath, instructionsPath);
+            return;
+        }
+
+        if (!File.Exists(instructionsPath) && File.Exists(legacyNestedInstructionsPath))
+        {
+            File.Move(legacyNestedInstructionsPath, instructionsPath);
             return;
         }
 
@@ -1338,7 +1345,7 @@ public sealed partial class AgentSupervisorService(
 
     private static string GetDefaultCopilotInstructionsContent()
     {
-        return "# Copilot 仓库说明\r\n\r\n## Scope\r\n- 仅在当前 workspace root 内工作；除非用户明确扩展范围，不要假设可以访问外部目录。\r\n- 若用户明确提到当前 workspace 外的真实目录或文件，RepoOPS 可能在运行时附加访问；在此之前不要自行假设有权限。\r\n- 外部目录若需要持续参与开发，优先保持 `.code-workspace` 与实际访问范围一致。\r\n\r\n## 默认执行原则\r\n- 环境问题优先：若缺 SDK、依赖、命令、包管理源或必要工具会阻断编码，应优先补齐环境，再继续业务开发；不要把环境问题拖到很多轮之后。\r\n- 连续编码阶段不做 UI 视觉验收：不要浪费时间做截图判读、录屏比对、像素级 UI 测试或主观界面评价。自动化验证默认只做 smoke、构建、探针和行为级检查，不做界面视觉判断。UI 只按设计实现，视觉效果留给后续人工阶段确认。\r\n- 中文优先：所有面向人的 UI 文案、仓库文档、说明、计划、总结、日志默认使用中文；英文只保留在代码符号、命令、协议字段、库名或必要原文中。\r\n- 规则尽量够用即可：优先最小可执行约束，不要堆过多口号式要求。\r\n\r\n## Skill 原则\r\n- 如果发现某类经验很重要、未来容易反复犯错，而且具有项目长期价值，可以自行沉淀为项目内 skill。\r\n- 优先放在 `.github/skills/<skill-name>/SKILL.md`，内容保持短小、聚焦、可复用。\r\n- 只有当经验确实会反复用到时再新增，不要把一次性问题也写成 skill。\r\n\r\n## 变更日志规范\r\n- 各线程/角色在项目根目录维护自己的 `角色-变更日志.md`，例如 `Helm-变更日志.md`、`Pathfinder-变更日志.md`。\r\n- 尽量简单记录当前轮次做的事情，不写过多细节，只说大面。\r\n- 仅追加，不删改历史。新日志追加到文末。\r\n- 格式固定：\r\n\r\n```\r\n## 轮次 角色xxx\r\n\r\n### 实现目标\r\n- （变更 / 修复 / 优化目标）\r\n\r\n### 变更内容\r\n- （改动点）\r\n\r\n### 验证结果（可选）\r\n\r\n### 后续计划（可选）\r\n```\r\n";
+        return "# Copilot 仓库说明\r\n\r\n## Scope\r\n- 仅在当前 workspace root 内工作；除非用户明确扩展范围，不要假设可以访问外部目录。\r\n- 若用户明确提到当前 workspace 外的真实目录或文件，RepoOPS 可能在运行时附加访问；在此之前不要自行假设有权限。\r\n- 外部目录若需要持续参与开发，优先保持 `.code-workspace` 与实际访问范围一致。\r\n- 开始实现、验证、总结前，必须先读取当前工作区 `.github/copilot-instructions.md`；不要改去读取宿主仓库或其他目录下的 instructions 文件。\r\n\r\n## 默认执行原则\r\n- 环境问题优先：若缺 SDK、依赖、命令、包管理源或必要工具会阻断编码，应优先补齐环境，再继续业务开发；不要把环境问题拖到很多轮之后。\r\n- 连续编码阶段不做 UI 视觉验收：不要浪费时间做截图判读、录屏比对、像素级 UI 测试或主观界面评价。自动化验证默认只做 smoke、构建、探针和行为级检查，不做界面视觉判断。UI 只按设计实现，视觉效果留给后续人工阶段确认。\r\n- 中文优先：所有面向人的 UI 文案、仓库文档、说明、计划、总结、日志默认使用中文；英文只保留在代码符号、命令、协议字段、库名或必要原文中。\r\n- 规则尽量够用即可：优先最小可执行约束，不要堆过多口号式要求。\r\n\r\n## Skill 原则\r\n- 如果发现某类经验很重要、未来容易反复犯错，而且具有项目长期价值，可以自行沉淀为项目内 skill。\r\n- 优先放在 `.github/skills/<skill-name>/SKILL.md`，内容保持短小、聚焦、可复用。\r\n- 只有当经验确实会反复用到时再新增，不要把一次性问题也写成 skill。\r\n\r\n## 变更日志规范\r\n- 各线程/角色在项目根目录维护自己的 `角色-变更日志.md`，例如 `Helm-变更日志.md`、`Pathfinder-变更日志.md`。\r\n- 尽量简单记录当前轮次做的事情，不写过多细节，只说大面。\r\n- 仅追加，不删改历史。新日志追加到文末。\r\n- 格式固定：\r\n\r\n```\r\n## 轮次 角色xxx\r\n\r\n### 实现目标\r\n- （变更 / 修复 / 优化目标）\r\n\r\n### 变更内容\r\n- （改动点）\r\n\r\n### 验证结果（可选）\r\n\r\n### 后续计划（可选）\r\n```\r\n";
     }
 
     private static void WriteWorkspaceMetadata(string workspacePath, string workspaceName, string goal, string executionRoot, IReadOnlyCollection<string>? additionalDirectories)

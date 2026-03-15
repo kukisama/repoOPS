@@ -194,7 +194,10 @@ function Normalize-Name([string]$value) {
 }
 
 function Get-StableSuffix([string]$value) {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($value ?? '')
+    if ($null -eq $value) {
+        $value = ''
+    }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
     $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
     $hex = [Convert]::ToHexString($hash).ToLowerInvariant()
     return $hex.Substring(0, 6)
@@ -271,10 +274,17 @@ Write-RunCsvLog -WorkspaceRoot $workspaceRoot -Type '初始化' -Content (Conver
         'RepoOPS执行Git初始化', $gitState.gitInitializedByRepoOps
     ))
 
-$githubDir = Join-Path $workspaceRoot '.github\copilot'
+$githubDir = Join-Path $workspaceRoot '.github'
+$copilotDir = Join-Path $githubDir 'copilot'
 New-Item -ItemType Directory -Path $githubDir -Force | Out-Null
+New-Item -ItemType Directory -Path $copilotDir -Force | Out-Null
 
 $instructionsPath = Join-Path $githubDir 'copilot-instructions.md'
+$legacyNestedInstructionsPath = Join-Path $copilotDir 'copilot-instructions.md'
+if (-not (Test-Path $instructionsPath) -and (Test-Path $legacyNestedInstructionsPath)) {
+    Move-Item -LiteralPath $legacyNestedInstructionsPath -Destination $instructionsPath -Force
+}
+
 if (-not (Test-Path $instructionsPath)) {
     @"
 # Workspace Rules
@@ -346,7 +356,7 @@ $allowedUrlsFile = Join-Path $policyDir 'allowed-urls.txt'
 $pathLines = @($workspaceRoot) + @($AllowedPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $pathLines | Select-Object -Unique | Set-Content -Path $allowedPathsFile -Encoding UTF8
 
-$settingsLocalPath = Join-Path $githubDir 'settings.local.json'
+$settingsLocalPath = Join-Path $copilotDir 'settings.local.json'
 $trustedFolders = @($pathLines | Select-Object -Unique)
 $settingsPayload = [ordered]@{
     trusted_folders = $trustedFolders
